@@ -1,6 +1,6 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
-cnb.cool/zhiqiangwang/pkg/logx v1.0.4 h1:Tjvsf21KjuOo1xGtcJLC+Fd8GFaeFf5CGhLzlMcWBuc=
-cnb.cool/zhiqiangwang/pkg/logx v1.0.4/go.mod h1:jqDUSiMMLUM0qMuyD1swPAMVuUOfY5xfCN1lFJDG6XM=
+cnb.cool/zhiqiangwang/pkg/logx v1.0.5 h1:nHG0sfdsHuvPfkpyORHsYe3rLDR+izhxdVqUTSkYrzY=
+cnb.cool/zhiqiangwang/pkg/logx v1.0.5/go.mod h1:jqDUSiMMLUM0qMuyD1swPAMVuUOfY5xfCN1lFJDG6XM=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/alibabacloud-go/alibabacloud-gateway-pop v0.0.6 h1:eIf+iGJxdU4U9ypaUfbtOWCsZSbTb8AUHvyPrxu6mAA=
 github.com/alibabacloud-go/alibabacloud-gateway-pop v0.0.6/go.mod h1:4EUIoxs/do24zMOGGqYVWgw0s9NtiylnJglOeEB5UJo=

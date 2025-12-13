@@ -3,6 +3,7 @@ package tencent
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
 	"github.com/eryajf/zenops/internal/model"
@@ -191,6 +192,10 @@ func convertCVMToInstance(inst *cvm.Instance, region string) *model.Instance {
 	// 创建时间
 	if inst.CreatedTime != nil {
 		instance.Metadata["created_time"] = *inst.CreatedTime
+		// 解析创建时间到 CreatedAt 字段
+		if t, err := time.Parse("2006-01-02T15:04:05Z", *inst.CreatedTime); err == nil {
+			instance.CreatedAt = t
+		}
 	}
 
 	// VPC 信息
@@ -211,6 +216,12 @@ func convertCVMToInstance(inst *cvm.Instance, region string) *model.Instance {
 	// 过期时间
 	if inst.ExpiredTime != nil {
 		instance.Metadata["expired_time"] = *inst.ExpiredTime
+		// 解析过期时间到 ExpiredAt 字段
+		if *inst.ExpiredTime != "" {
+			if t, err := time.Parse("2006-01-02T15:04:05Z", *inst.ExpiredTime); err == nil {
+				instance.ExpiredAt = &t
+			}
+		}
 	}
 
 	// 镜像 ID

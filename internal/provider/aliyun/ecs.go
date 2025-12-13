@@ -115,15 +115,25 @@ func convertECSToInstance(inst *ecs.DescribeInstancesResponseBodyInstancesInstan
 
 	// 解析创建时间
 	if inst.CreationTime != nil {
-		if t, err := time.Parse("2006-01-02T15:04:05Z", tea.StringValue(inst.CreationTime)); err == nil {
-			instance.CreatedAt = t
+		creationTime := tea.StringValue(inst.CreationTime)
+		// 阿里云时间格式可能是 "2006-01-02T15:04Z" 或 "2006-01-02T15:04:05Z"
+		for _, layout := range []string{"2006-01-02T15:04:05Z", "2006-01-02T15:04Z"} {
+			if t, err := time.Parse(layout, creationTime); err == nil {
+				instance.CreatedAt = t
+				break
+			}
 		}
 	}
 
 	// 解析过期时间
 	if inst.ExpiredTime != nil && tea.StringValue(inst.ExpiredTime) != "" {
-		if t, err := time.Parse("2006-01-02T15:04:05Z", tea.StringValue(inst.ExpiredTime)); err == nil {
-			instance.ExpiredAt = &t
+		expiredTime := tea.StringValue(inst.ExpiredTime)
+		// 阿里云时间格式可能是 "2006-01-02T15:04Z" 或 "2006-01-02T15:04:05Z"
+		for _, layout := range []string{"2006-01-02T15:04:05Z", "2006-01-02T15:04Z"} {
+			if t, err := time.Parse(layout, expiredTime); err == nil {
+				instance.ExpiredAt = &t
+				break
+			}
 		}
 	}
 

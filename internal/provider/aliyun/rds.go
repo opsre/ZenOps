@@ -127,8 +127,13 @@ func convertRDSToDatabase(inst *rds.DescribeDBInstancesResponseBodyItemsDBInstan
 
 	// 解析创建时间
 	if inst.CreateTime != nil {
-		if t, err := time.Parse("2006-01-02T15:04:05Z", tea.StringValue(inst.CreateTime)); err == nil {
-			database.CreatedAt = t
+		createTime := tea.StringValue(inst.CreateTime)
+		// 阿里云时间格式可能是 "2006-01-02T15:04Z" 或 "2006-01-02T15:04:05Z"
+		for _, layout := range []string{"2006-01-02T15:04:05Z", "2006-01-02T15:04Z"} {
+			if t, err := time.Parse(layout, createTime); err == nil {
+				database.CreatedAt = t
+				break
+			}
 		}
 	}
 

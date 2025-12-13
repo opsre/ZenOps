@@ -3,7 +3,7 @@ module github.com/eryajf/zenops
 go 1.25.4
 
 require (
-	cnb.cool/zhiqiangwang/pkg/logx v1.0.4
+	cnb.cool/zhiqiangwang/pkg/logx v1.0.5
 	github.com/alibabacloud-go/darabonba-openapi v0.2.1
 	github.com/alibabacloud-go/darabonba-openapi/v2 v2.1.7
 	github.com/alibabacloud-go/dingtalk v1.6.88

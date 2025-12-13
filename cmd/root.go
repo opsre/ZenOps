@@ -86,6 +86,27 @@ var runCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logx.Info("🧘 Starting ZenOps Server, Version %s", Version)
 
+		// 检查 flag 冲突
+		if httpOnly && mcpOnly {
+			return fmt.Errorf("--http-only 和 --mcp-only 不能同时使用")
+		}
+
+		// 确定要启动的服务
+		startHTTP := !mcpOnly && cfg.Server.HTTP.Enabled
+		startMCP := !httpOnly && cfg.Server.MCP.Enabled
+
+		// 如果使用了 --http-only，即使配置文件中 HTTP 未启用也要启动
+		if httpOnly {
+			startHTTP = true
+			startMCP = false
+		}
+
+		// 如果使用了 --mcp-only，即使配置文件中 MCP 未启用也要启动
+		if mcpOnly {
+			startMCP = true
+			startHTTP = false
+		}
+
 		// 创建 context
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -119,7 +140,8 @@ var runCmd = &cobra.Command{
 		}
 
 		// 启动 HTTP 服务
-		if cfg.Server.HTTP.Enabled && !mcpOnly {
+		if startHTTP {
+			logx.Info("🌐 Starting HTTP server...")
 			go func() {
 				// 创建 HTTP 服务器 (使用 Gin)
 				httpServer := server.NewHTTPGinServer(cfg)
@@ -132,7 +154,8 @@ var runCmd = &cobra.Command{
 		}
 
 		// 启动 MCP 服务
-		if cfg.Server.MCP.Enabled && !httpOnly {
+		if startMCP {
+			logx.Info("🔌 Starting MCP server...")
 			go func() {
 				// 创建 MCP 服务器
 				mcpServer := imcp.NewMCPServer(cfg)
@@ -142,6 +165,11 @@ var runCmd = &cobra.Command{
 					errCh <- fmt.Errorf("mcp server error: %w", err)
 				}
 			}()
+		}
+
+		// 如果没有任何服务启动，给出提示
+		if !startHTTP && !startMCP && !cfg.DingTalk.Enabled {
+			logx.Warn("⚠️  No services enabled. Please check your configuration or use --http-only or --mcp-only flags.")
 		}
 
 		// 等待退出信号或错误
