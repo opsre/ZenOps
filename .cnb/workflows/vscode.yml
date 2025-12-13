@@ -1,0 +1,13 @@
+$:
+  vscode:
+    - docker:
+        image: docker.cnb.cool/znb/images/debian:new
+      runner:
+        cpus: 8
+      services:
+        - vscode
+        - docker
+      stages:
+        - name: 默认安装依赖
+          script: |
+            go mod tidy -v

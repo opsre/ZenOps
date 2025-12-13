@@ -1,0 +1,36 @@
+name: Generate changelog
+
+on:
+  release:
+    types: [ created, published ] # 表示在创建新的 Release 时触发
+  workflow_dispatch:  
+
+jobs:
+  generate-changelog:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        
+    - name: Generate changelog
+      uses: janheinrichmerker/action-github-changelog-generator@v2.4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        futureRelease: ${{ github.event.release.tag_name || env.LATEST_TAG }}
+        excludeTagsRegex: "^v[0-9]$"
+        output: CHANGELOG.md
+        repo: "eryajf/eryajfctl"
+        unreleased: true
+        issues: true
+        pullRequests: true
+        includeLabels: "bug,enhancement,feature"
+
+    - name: Git Commit and Push
+      uses: somaz94/go-git-commit-action@v1
+      with:
+        branch: main
+        commit_message: "Update changelog"
+        user_email: "actions@github.com"
+        user_name: "GitHub Actions"
+        file_pattern: "CHANGELOG.md"

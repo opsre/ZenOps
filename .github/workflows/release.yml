@@ -1,0 +1,31 @@
+name: build and push binary to release
+
+on:
+  release:
+    types: [ created, published ] # 表示在创建新的 Release 时触发
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: 设置go环境
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+          cache-dependency-path: "go.sum"
+      - name: 安装 UPX
+        uses: crazy-max/ghaction-upx@v3
+        with:
+          install-only: true
+      - run: go install github.com/authelia/gox@latest # setup gox
+      - run: make gox-all
+
+      - name: 上传二进制
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: bin/*
+          tag: ${{ github.ref }}
+          overwrite: true
+          file_glob: true

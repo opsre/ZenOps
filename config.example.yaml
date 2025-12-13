@@ -1,0 +1,85 @@
+# 云服务提供商配置
+providers:
+  # 阿里云账号配置(支持多账号)
+  aliyun:
+    - name: "default"
+      enabled: true
+      ak: "YOUR_ACCESS_KEY_ID"
+      sk: "YOUR_ACCESS_KEY_SECRET"
+      regions:
+        - "cn-hangzhou"
+        - "cn-shanghai"
+
+    - name: "other"
+      enabled: false
+      ak: "YOUR_TEST_ACCESS_KEY_ID"
+      sk: "YOUR_TEST_ACCESS_KEY_SECRET"
+      regions:
+        - "cn-beijing"
+
+  # 腾讯云账号配置(支持多账号)
+  tencent:
+    - name: "default"
+      enabled: true
+      ak: "YOUR_SECRET_ID"
+      sk: "YOUR_SECRET_KEY"
+      regions:
+        - "ap-guangzhou"
+        - "ap-shanghai"
+
+# CI/CD 工具配置
+cicd:
+  # Jenkins 配置
+  jenkins:
+    enabled: true
+    url: "https://jenkins.example.com"
+    username: "admin"
+    token: "YOUR_JENKINS_TOKEN"
+
+# 钉钉配置
+dingtalk:
+  enabled: true
+
+  # 钉钉应用凭证
+  app_key: "YOUR_DINGTALK_APP_KEY"
+  app_secret: "YOUR_DINGTALK_APP_SECRET"
+  agent_id: "YOUR_AGENT_ID"
+
+  # 流式卡片配置
+  card_template_id: ""  # AI 流式卡片模板 ID(可选,需要在钉钉开放平台创建)
+
+  # LLM 对话配置
+  enable_llm_conversation: true  # 是否启用 LLM 智能对话模式
+
+# LLM 大模型配置
+llm:
+  enabled: true
+  model: "DeepSeek-V3"
+  api_key: "YOUR_LLM_API_KEY"
+  base_url: ""  # 自定义 API 端点
+
+# 服务器配置
+server:
+  # HTTP 服务配置
+  http:
+    enabled: true
+    port: 8080
+
+  # MCP 服务配置
+  mcp:
+    enabled: true
+    port: 8081
+
+# 认证配置
+auth:
+  enabled: false
+  type: "token"  # token, basic, oauth2
+  tokens:
+    - "your-secure-token-1"
+    - "your-secure-token-2"
+
+# 缓存配置
+cache:
+  enabled: true
+  type: "memory"  # memory 或 redis
+  ttl: 300  # 缓存过期时间(秒)
