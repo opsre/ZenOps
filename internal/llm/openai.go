@@ -123,7 +123,7 @@ func (c *OpenAIClient) ChatStream(ctx context.Context, req *ChatRequest) (<-chan
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		for {
 			response, err := stream.Recv()
@@ -416,7 +416,7 @@ func (c *Client) ChatWithToolsAndStream(ctx context.Context, userMessage string)
 					Name:       toolCall.Function.Name,
 				})
 
-				responseCh <- fmt.Sprintf("✅ 工具执行完成\n\n")
+				responseCh <- "✅ 工具执行完成\n\n"
 			}
 			// 继续循环,让 LLM 处理工具结果
 		}
@@ -506,7 +506,7 @@ func (c *Client) streamChatWithTools(
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to create stream: %w", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	// 累积结果
 	result := &StreamResult{

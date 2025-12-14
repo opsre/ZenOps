@@ -221,7 +221,7 @@ func (c *DingTalkStreamClient) StreamResponse(ctx context.Context, trackID strin
 				// 通道关闭,发送最终更新
 				if err := c.StreamingUpdate(trackID, fullContent, true); err != nil {
 					logx.Error("Final streaming update failed: %v", err)
-					c.StreamingUpdate(trackID, fullContent+"\n\n⚠️ 部分内容可能未完整显示", true)
+					_ = c.StreamingUpdate(trackID, fullContent+"\n\n⚠️ 部分内容可能未完整显示", true)
 				}
 				return
 			}
@@ -239,7 +239,7 @@ func (c *DingTalkStreamClient) StreamResponse(ctx context.Context, trackID strin
 
 		case <-ctx.Done():
 			// 上下文取消
-			c.StreamingUpdate(trackID, fullContent+"\n\n⚠️ 查询已取消", true)
+			_ = c.StreamingUpdate(trackID, fullContent+"\n\n⚠️ 查询已取消", true)
 			return
 		}
 	}

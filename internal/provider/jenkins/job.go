@@ -132,51 +132,52 @@ func convertJobToModel(job *gojenkins.Job) *model.Job {
 	return modelJob
 }
 
+// These functions are intentionally kept for future use
 // extractJobType 从 Java 类名提取任务类型
-func extractJobType(class string) string {
-	// 例如: "hudson.model.FreeStyleProject" -> "FreeStyle"
-	//      "org.jenkinsci.plugins.workflow.job.WorkflowJob" -> "Pipeline"
-	if strings.Contains(class, "FreeStyleProject") {
-		return "FreeStyle"
-	}
-	if strings.Contains(class, "WorkflowJob") {
-		return "Pipeline"
-	}
-	if strings.Contains(class, "MatrixProject") {
-		return "Matrix"
-	}
-	if strings.Contains(class, "MavenModuleSet") {
-		return "Maven"
-	}
-
-	// 提取类名最后一部分
-	parts := strings.Split(class, ".")
-	if len(parts) > 0 {
-		return parts[len(parts)-1]
-	}
-
-	return "Unknown"
-}
+// func extractJobType(class string) string {
+// 	// 例如: "hudson.model.FreeStyleProject" -> "FreeStyle"
+// 	//      "org.jenkinsci.plugins.workflow.job.WorkflowJob" -> "Pipeline"
+// 	if strings.Contains(class, "FreeStyleProject") {
+// 		return "FreeStyle"
+// 	}
+// 	if strings.Contains(class, "WorkflowJob") {
+// 		return "Pipeline"
+// 	}
+// 	if strings.Contains(class, "MatrixProject") {
+// 		return "Matrix"
+// 	}
+// 	if strings.Contains(class, "MavenModuleSet") {
+// 		return "Maven"
+// 	}
+//
+// 	// 提取类名最后一部分
+// 	parts := strings.Split(class, ".")
+// 	if len(parts) > 0 {
+// 		return parts[len(parts)-1]
+// 	}
+//
+// 	return "Unknown"
+// }
 
 // convertJobColor 转换 Jenkins 颜色状态为友好的状态名
-func convertJobColor(color string) string {
-	// 移除 _anime 后缀 (表示正在构建)
-	color = strings.TrimSuffix(color, "_anime")
-
-	switch color {
-	case "blue":
-		return "Success"
-	case "red":
-		return "Failed"
-	case "yellow":
-		return "Unstable"
-	case "grey":
-		return "NotBuilt"
-	case "disabled":
-		return "Disabled"
-	case "aborted":
-		return "Aborted"
-	default:
-		return color
-	}
-}
+// func convertJobColor(color string) string {
+// 	// 移除 _anime 后缀 (表示正在构建)
+// 	color = strings.TrimSuffix(color, "_anime")
+//
+// 	switch color {
+// 	case "blue":
+// 		return "Success"
+// 	case "red":
+// 		return "Failed"
+// 	case "yellow":
+// 		return "Unstable"
+// 	case "grey":
+// 		return "NotBuilt"
+// 	case "disabled":
+// 		return "Disabled"
+// 	case "aborted":
+// 		return "Aborted"
+// 	default:
+// 		return color
+// 	}
+// }

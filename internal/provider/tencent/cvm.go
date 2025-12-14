@@ -159,7 +159,7 @@ func convertCVMToInstance(inst *cvm.Instance, region string) *model.Instance {
 	}
 
 	// 内网 IP
-	if inst.PrivateIpAddresses != nil && len(inst.PrivateIpAddresses) > 0 {
+	if len(inst.PrivateIpAddresses) > 0 {
 		for _, ip := range inst.PrivateIpAddresses {
 			if ip != nil {
 				instance.PrivateIP = append(instance.PrivateIP, *ip)
@@ -168,7 +168,7 @@ func convertCVMToInstance(inst *cvm.Instance, region string) *model.Instance {
 	}
 
 	// 公网 IP
-	if inst.PublicIpAddresses != nil && len(inst.PublicIpAddresses) > 0 {
+	if len(inst.PublicIpAddresses) > 0 {
 		for _, ip := range inst.PublicIpAddresses {
 			if ip != nil {
 				instance.PublicIP = append(instance.PublicIP, *ip)

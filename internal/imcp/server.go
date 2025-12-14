@@ -127,6 +127,32 @@ func (s *MCPServer) registerTools() {
 		s.handleSearchRDSByName,
 	)
 
+	// 7. list_oss - 列出所有 OSS 存储桶
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_oss",
+			mcp.WithDescription("列出所有阿里云 OSS 存储桶"),
+			mcp.WithString("account",
+				mcp.Description("阿里云账号名称(可选)"),
+			),
+		),
+		s.handleListOSS,
+	)
+
+	// 8. get_oss - 获取 OSS 存储桶详情
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_oss",
+			mcp.WithDescription("获取指定 OSS 存储桶的详细信息"),
+			mcp.WithString("bucket_name",
+				mcp.Required(),
+				mcp.Description("存储桶名称"),
+			),
+			mcp.WithString("account",
+				mcp.Description("阿里云账号名称(可选)"),
+			),
+		),
+		s.handleGetOSS,
+	)
+
 	// ==================== 腾讯云 CVM 工具 ====================
 
 	// 7. search_cvm_by_ip - 根据 IP 搜索腾讯云 CVM
@@ -217,6 +243,34 @@ func (s *MCPServer) registerTools() {
 			),
 		),
 		s.handleSearchCDBByName,
+	)
+
+	// ==================== 腾讯云 COS 工具 ====================
+
+	// 13. list_cos - 列出腾讯云 COS 存储桶
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_cos",
+			mcp.WithDescription("列出所有腾讯云 COS 存储桶"),
+			mcp.WithString("account",
+				mcp.Description("腾讯云账号名称(可选)"),
+			),
+		),
+		s.handleListCOS,
+	)
+
+	// 14. get_cos - 获取腾讯云 COS 存储桶详情
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_cos",
+			mcp.WithDescription("获取指定腾讯云 COS 存储桶的详细信息"),
+			mcp.WithString("bucket_name",
+				mcp.Required(),
+				mcp.Description("存储桶名称"),
+			),
+			mcp.WithString("account",
+				mcp.Description("腾讯云账号名称(可选)"),
+			),
+		),
+		s.handleGetCOS,
 	)
 
 	// ==================== Jenkins 工具 ====================
@@ -314,6 +368,12 @@ func (s *MCPServer) CallTool(ctx context.Context, toolName string, arguments map
 	case "search_rds_by_name":
 		return s.handleSearchRDSByName(ctx, request)
 
+	// 阿里云 OSS
+	case "list_oss":
+		return s.handleListOSS(ctx, request)
+	case "get_oss":
+		return s.handleGetOSS(ctx, request)
+
 	// 腾讯云 CVM
 	case "search_cvm_by_ip":
 		return s.handleSearchCVMByIP(ctx, request)
@@ -329,6 +389,12 @@ func (s *MCPServer) CallTool(ctx context.Context, toolName string, arguments map
 		return s.handleListCDB(ctx, request)
 	case "search_cdb_by_name":
 		return s.handleSearchCDBByName(ctx, request)
+
+	// 腾讯云 COS
+	case "list_cos":
+		return s.handleListCOS(ctx, request)
+	case "get_cos":
+		return s.handleGetCOS(ctx, request)
 
 	// Jenkins
 	case "list_jenkins_jobs":

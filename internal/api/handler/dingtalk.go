@@ -36,7 +36,7 @@ func (h *DingTalkHandler) HandleCallback(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	logx.Debug("Request body: %v", string(body))
 	// 验证签名
@@ -118,7 +118,7 @@ func (h *DingTalkHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 	// 这里可以添加主动发送消息的逻辑
 	// 暂时返回成功
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
 		"message": "Webhook received",
 	})
@@ -127,7 +127,7 @@ func (h *DingTalkHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 // HandleHealthCheck 健康检查
 func (h *DingTalkHandler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
 		"service": "dingtalk",
 	})

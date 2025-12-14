@@ -1,6 +1,7 @@
 package dingtalk
 
 import (
+	"context"
 	"fmt"
 
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
@@ -138,7 +139,7 @@ func (c *Client) UpdateAIStreamCard(trackID, content string, isFinalize bool) er
 		return fmt.Errorf("failed to create stream card client: %w", err)
 	}
 
-	accessToken, err := c.GetAccessToken(nil)
+	accessToken, err := c.GetAccessToken(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to get access token: %w", err)
 	}
@@ -162,7 +163,7 @@ func (c *Client) UpdateAIStreamCardWithError(trackID, errorMsg string) error {
 		return fmt.Errorf("failed to create stream card client: %w", err)
 	}
 
-	accessToken, err := c.GetAccessToken(nil)
+	accessToken, err := c.GetAccessToken(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to get access token: %w", err)
 	}

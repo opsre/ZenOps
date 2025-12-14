@@ -62,7 +62,7 @@ func (p *TencentProvider) Initialize(config map[string]any) error {
 		p.regions = append(p.regions, region)
 		p.clients[region] = NewClient(secretID, secretKey, region)
 
-		logx.Debug("Initialized Tencent client for region " + region)
+		logx.Debug("%s", "Initialized Tencent client for region "+region)
 	}
 
 	logx.Info("Tencent Provider initialized, regions count %d", len(p.regions))
@@ -88,6 +88,30 @@ func (p *TencentProvider) ListDatabases(ctx context.Context, opts *provider.Quer
 // GetDatabase 获取数据库详情
 func (p *TencentProvider) GetDatabase(ctx context.Context, dbID string) (*model.Database, error) {
 	return p.GetCDBInstance(ctx, dbID)
+}
+
+// ListOSSBuckets 列出对象存储桶
+func (p *TencentProvider) ListOSSBuckets(ctx context.Context, opts *provider.QueryOptions) ([]*model.OSSBucket, error) {
+	if opts == nil {
+		opts = &provider.QueryOptions{}
+	}
+
+	// COS 是全局服务，使用任意一个客户端即可
+	for _, client := range p.clients {
+		return client.ListCOSBuckets(ctx, opts.PageSize, opts.PageNum, opts.Filters)
+	}
+
+	return nil, fmt.Errorf("no clients available")
+}
+
+// GetOSSBucket 获取对象存储桶详情
+func (p *TencentProvider) GetOSSBucket(ctx context.Context, bucketName string) (*model.OSSBucket, error) {
+	// COS 是全局服务，使用任意一个客户端即可
+	for _, client := range p.clients {
+		return client.GetCOSBucket(ctx, bucketName)
+	}
+
+	return nil, fmt.Errorf("no clients available")
 }
 
 // HealthCheck 健康检查

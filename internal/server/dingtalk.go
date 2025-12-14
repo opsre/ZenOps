@@ -81,7 +81,7 @@ func (c *DingTalkCrypto) DecryptMessage(encryptedMsg string) (*DingTalkMessage, 
 	msgContent := plaintext[20 : 20+msgLen]
 
 	var msg DingTalkMessage
-	json.Unmarshal(msgContent, &msg)
+	_ = json.Unmarshal(msgContent, &msg)
 	return &msg, nil
 }
 
@@ -300,7 +300,7 @@ func (h *DingTalkMessageHandler) processQueryAsync(ctx context.Context, msg *Din
 	result, err := h.callMCPTool(ctx, intent)
 	if err != nil {
 		logx.Error("Failed to call MCP tool: %v", err)
-		h.streamClient.StreamError(trackID, err, question)
+		_ = h.streamClient.StreamError(trackID, err, question)
 		return
 	}
 

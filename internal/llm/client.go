@@ -363,9 +363,10 @@ func ParseSSEResponse(reader io.Reader, responseCh chan<- string) error {
 			}
 
 			// 处理工具调用
-			if len(delta.ToolCalls) > 0 {
-				// TODO: 处理流式工具调用
-			}
+			// 当前版本暂不处理流式工具调用
+			// if len(delta.ToolCalls) > 0 {
+			// TODO: 处理流式工具调用
+			// }
 		}
 	}
 

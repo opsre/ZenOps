@@ -56,19 +56,19 @@ func (p *AliyunProvider) Initialize(config map[string]any) error {
 
 		client, err := NewClient(accessKeyID, accessKeySecret, region)
 		if err != nil {
-			logx.Warn("Failed to create client for region " + region + ": " + err.Error())
+			logx.Warn("%s", "Failed to create client for region "+region+": "+err.Error())
 			continue
 		}
 
 		p.clients[region] = client
-		logx.Info("Initialized Aliyun client for region " + region)
+		logx.Info("%s", "Initialized Aliyun client for region "+region)
 	}
 
 	if len(p.clients) == 0 {
 		return fmt.Errorf("no valid region clients created")
 	}
 
-	logx.Info("Aliyun provider initialized successfully, regions " + fmt.Sprintf("%d", len(p.clients)))
+	logx.Info("%s", "Aliyun provider initialized successfully, regions "+fmt.Sprintf("%d", len(p.clients)))
 
 	return nil
 }
@@ -161,6 +161,30 @@ func (p *AliyunProvider) GetDatabase(ctx context.Context, dbID string) (*model.D
 	return nil, fmt.Errorf("database %s not found in any region", dbID)
 }
 
+// ListOSSBuckets 列出对象存储桶
+func (p *AliyunProvider) ListOSSBuckets(ctx context.Context, opts *provider.QueryOptions) ([]*model.OSSBucket, error) {
+	if opts == nil {
+		opts = &provider.QueryOptions{}
+	}
+
+	// OSS 是全局服务，使用任意一个客户端即可
+	for _, client := range p.clients {
+		return client.ListOSSBuckets(ctx, opts.PageSize, opts.PageNum, opts.Filters)
+	}
+
+	return nil, fmt.Errorf("no clients available")
+}
+
+// GetOSSBucket 获取对象存储桶详情
+func (p *AliyunProvider) GetOSSBucket(ctx context.Context, bucketName string) (*model.OSSBucket, error) {
+	// OSS 是全局服务，使用任意一个客户端即可
+	for _, client := range p.clients {
+		return client.GetOSSBucket(ctx, bucketName)
+	}
+
+	return nil, fmt.Errorf("no clients available")
+}
+
 // HealthCheck 健康检查
 func (p *AliyunProvider) HealthCheck(ctx context.Context) error {
 	if len(p.clients) == 0 {
@@ -172,10 +196,10 @@ func (p *AliyunProvider) HealthCheck(ctx context.Context) error {
 		// 尝试查询一个实例列表(限制为1条)
 		_, err := client.ListECSInstances(ctx, 1, 1, nil)
 		if err == nil {
-			logx.Debug("Health check passed for region " + region)
+			logx.Debug("%s", "Health check passed for region "+region)
 			return nil
 		}
-		logx.Debug("Health check failed for region " + region + ", error " + err.Error())
+		logx.Debug("%s", "Health check failed for region "+region+", error "+err.Error())
 	}
 
 	return fmt.Errorf("all regions failed health check")

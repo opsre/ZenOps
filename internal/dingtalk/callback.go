@@ -242,10 +242,10 @@ func (c *CallbackCrypto) pkcs7UnPadding(data []byte) []byte {
 // randomString 生成随机字符串
 func (c *CallbackCrypto) randomString(length int) string {
 	const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-	rand.Seed(time.Now().UnixNano())
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	result := make([]byte, length)
 	for i := range result {
-		result[i] = chars[rand.Intn(len(chars))]
+		result[i] = chars[rng.Intn(len(chars))]
 	}
 	return string(result)
 }

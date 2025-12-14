@@ -140,11 +140,9 @@ func (h *DingTalkStreamHandler) cleanAtMention(content, chatbotUserID string, at
 	content = strings.ReplaceAll(content, "@"+chatbotUserID, "")
 
 	// 去除其他@用户
-	if atUsers != nil {
-		for _, user := range atUsers {
-			if user.DingtalkId != "" {
-				content = strings.ReplaceAll(content, "@"+user.DingtalkId, "")
-			}
+	for _, user := range atUsers {
+		if user.DingtalkId != "" {
+			content = strings.ReplaceAll(content, "@"+user.DingtalkId, "")
 		}
 	}
 
@@ -172,7 +170,7 @@ func (h *DingTalkStreamHandler) sendHelpMessage(ctx context.Context, data *chatb
 		return
 	}
 
-	h.cardClient.StreamingUpdate(trackID, helpContent, true)
+	_ = h.cardClient.StreamingUpdate(trackID, helpContent, true)
 }
 
 // sendErrorMessage 发送错误消息
@@ -200,7 +198,7 @@ func (h *DingTalkStreamHandler) sendErrorMessage(ctx context.Context, data *chat
 		return
 	}
 
-	h.cardClient.StreamingUpdate(trackID, errorContent, true)
+	_ = h.cardClient.StreamingUpdate(trackID, errorContent, true)
 }
 
 // processQueryAsync 异步处理查询
@@ -245,7 +243,7 @@ func (h *DingTalkStreamHandler) processQueryAsync(ctx context.Context, data *cha
 
 		if useCard {
 			errorContent := fmt.Sprintf("**%s**\n\n❌ **查询失败**\n\n错误: %s", question, err.Error())
-			h.cardClient.StreamingUpdate(trackID, errorContent, true)
+			_ = h.cardClient.StreamingUpdate(trackID, errorContent, true)
 		} else {
 			h.sendTextReply(data, fmt.Sprintf("❌ 查询失败\n\n错误: %s", err.Error()))
 		}
@@ -734,7 +732,7 @@ func (h *DingTalkStreamHandler) processLLMMessage(ctx context.Context, data *cha
 		errorMsg := fmt.Sprintf("❌ LLM 调用失败: %v", err)
 
 		if useCard {
-			h.cardClient.StreamingUpdate(trackID, fmt.Sprintf("**%s**\n\n%s", userMessage, errorMsg), true)
+			_ = h.cardClient.StreamingUpdate(trackID, fmt.Sprintf("**%s**\n\n%s", userMessage, errorMsg), true)
 		} else {
 			h.sendTextReply(data, errorMsg)
 		}
