@@ -3,6 +3,7 @@ package tencent
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
 	"github.com/eryajf/zenops/internal/model"
@@ -147,6 +148,13 @@ func convertCDBToDatabase(inst *cdb.InstanceInfo, region string) *model.Database
 	// 如果名称为空,使用 ID 作为名称
 	if database.Name == "" {
 		database.Name = database.ID
+	}
+
+	// 创建时间
+	if inst.CreateTime != nil {
+		if t, err := time.Parse("2006-01-02 15:04:05", *inst.CreateTime); err == nil {
+			database.CreatedAt = t
+		}
 	}
 
 	// 生成控制台跳转URL

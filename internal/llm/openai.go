@@ -104,6 +104,8 @@ func (c *OpenAIClient) ChatStream(ctx context.Context, req *ChatRequest) (<-chan
 			})
 		}
 		openaiReq.Tools = tools
+		// 设置工具调用策略为 auto,让 AI 根据需要决定是否调用工具
+		openaiReq.ToolChoice = "auto"
 	}
 
 	contentCh := make(chan string, 10)
@@ -121,7 +123,7 @@ func (c *OpenAIClient) ChatStream(ctx context.Context, req *ChatRequest) (<-chan
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		for {
 			response, err := stream.Recv()
@@ -213,6 +215,8 @@ func (c *OpenAIClient) ChatWithTools(ctx context.Context, messages []Message, to
 			})
 		}
 		req.Tools = openaiTools
+		// 设置工具调用策略为 auto,让 AI 根据需要决定是否调用工具
+		req.ToolChoice = "auto"
 	}
 
 	// 调用 API
@@ -412,7 +416,7 @@ func (c *Client) ChatWithToolsAndStream(ctx context.Context, userMessage string)
 					Name:       toolCall.Function.Name,
 				})
 
-				responseCh <- fmt.Sprintf("✅ 工具执行完成\n\n")
+				responseCh <- "✅ 工具执行完成\n\n"
 			}
 			// 继续循环,让 LLM 处理工具结果
 		}
@@ -492,6 +496,9 @@ func (c *Client) streamChatWithTools(
 
 	if len(openaiTools) > 0 {
 		openaiReq.Tools = openaiTools
+		// 设置工具调用策略为 auto,让 AI 根据需要决定是否调用工具
+		// 如果想强制调用工具,可以改为 "required"
+		openaiReq.ToolChoice = "auto"
 	}
 
 	logx.Debug("Creating streaming chat completion with tools")
@@ -499,7 +506,7 @@ func (c *Client) streamChatWithTools(
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to create stream: %w", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	// 累积结果
 	result := &StreamResult{

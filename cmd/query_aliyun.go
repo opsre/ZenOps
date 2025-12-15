@@ -11,6 +11,7 @@ import (
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/model"
 	"github.com/eryajf/zenops/internal/provider"
+	aliyunprovider "github.com/eryajf/zenops/internal/provider/aliyun"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +28,7 @@ var (
 var aliyunCmd = &cobra.Command{
 	Use:   "aliyun",
 	Short: "查询阿里云资源",
-	Long:  `查询阿里云的 ECS 实例、RDS 数据库等资源信息。`,
+	Long:  `查询阿里云的 ECS 实例、RDS 数据库、OSS 存储桶等资源信息。`,
 }
 
 // aliyunECSCmd 阿里云 ECS 命令组
@@ -393,6 +394,145 @@ func getAliyunConfig(accountName string) (*config.ProviderConfig, error) {
 	return nil, fmt.Errorf("aliyun account '%s' not found", accountName)
 }
 
+// aliyunOSSCmd 阿里云 OSS 命令组
+var aliyunOSSCmd = &cobra.Command{
+	Use:   "oss",
+	Short: "查询阿里云 OSS 存储桶",
+	Long:  `查询阿里云 OSS 存储桶列表和详情。`,
+}
+
+// aliyunOSSListCmd 列出 OSS 存储桶
+var aliyunOSSListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "列出 OSS 存储桶",
+	Long:  `列出阿里云 OSS 存储桶列表。`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+
+		// 获取指定账号的配置
+		aliyunConfig, err := getAliyunConfig(aliyunAccount)
+		if err != nil {
+			return err
+		}
+
+		// 创建临时客户端
+		var ossClient *aliyunprovider.Client
+		for _, region := range aliyunConfig.Regions {
+			c, err := aliyunprovider.NewClient(aliyunConfig.AK, aliyunConfig.SK, region)
+			if err == nil {
+				ossClient = c
+				break
+			}
+		}
+		if ossClient == nil {
+			return fmt.Errorf("failed to create OSS client")
+		}
+
+		var buckets []*model.OSSBucket
+		if aliyunFetchAll {
+			pageNum := 1
+			pageSize := aliyunPageSize
+			if pageSize <= 0 {
+				pageSize = 100
+			}
+
+			logx.Info("Fetching all OSS buckets, account %s", aliyunConfig.Name)
+
+			for {
+				pageBuckets, err := ossClient.ListOSSBuckets(ctx, pageSize, pageNum, nil)
+				if err != nil {
+					return fmt.Errorf("failed to list OSS buckets (page %d): %w", pageNum, err)
+				}
+
+				buckets = append(buckets, pageBuckets...)
+
+				if len(pageBuckets) < pageSize {
+					break
+				}
+
+				pageNum++
+				logx.Debug("Fetching next page, page: %d, current_total: %d", pageNum, len(buckets))
+			}
+		} else {
+			buckets, err = ossClient.ListOSSBuckets(ctx, aliyunPageSize, aliyunPageNum, nil)
+			if err != nil {
+				return fmt.Errorf("failed to list OSS buckets: %w", err)
+			}
+		}
+
+		// 输出结果
+		if aliyunOutputType == "json" {
+			data, _ := json.MarshalIndent(buckets, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			// 使用 lipgloss/table 表格输出
+			rows := [][]string{}
+
+			for _, bucket := range buckets {
+				rows = append(rows, []string{
+					bucket.Name, bucket.Region, bucket.StorageClass,
+					bucket.CreatedAt, bucket.ACL,
+				})
+			}
+
+			t := table.New().
+				Border(lipgloss.NormalBorder()).
+				BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("99"))).
+				Headers("Name", "Region", "Storage Class", "Created At", "ACL").
+				Rows(rows...)
+
+			fmt.Println(t)
+			fmt.Println()
+			logx.Info("Query completed, count %d, account %s", len(buckets), aliyunConfig.Name)
+		}
+
+		return nil
+	},
+}
+
+// aliyunOSSGetCmd 获取 OSS 存储桶详情
+var aliyunOSSGetCmd = &cobra.Command{
+	Use:   "get <bucket-name>",
+	Short: "获取 OSS 存储桶详情",
+	Long:  `获取指定 OSS 存储桶的详细信息。`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		bucketName := args[0]
+		ctx := context.Background()
+
+		// 获取指定账号的配置
+		aliyunConfig, err := getAliyunConfig(aliyunAccount)
+		if err != nil {
+			return err
+		}
+
+		// 创建临时客户端
+		var ossClient *aliyunprovider.Client
+		for _, region := range aliyunConfig.Regions {
+			c, err := aliyunprovider.NewClient(aliyunConfig.AK, aliyunConfig.SK, region)
+			if err == nil {
+				ossClient = c
+				break
+			}
+		}
+		if ossClient == nil {
+			return fmt.Errorf("failed to create OSS client")
+		}
+
+		// 获取存储桶详情
+		bucket, err := ossClient.GetOSSBucket(ctx, bucketName)
+		if err != nil {
+			return fmt.Errorf("failed to get OSS bucket: %w", err)
+		}
+
+		// 输出结果
+		data, _ := json.MarshalIndent(bucket, "", "  ")
+		fmt.Println(string(data))
+
+		return nil
+	},
+}
+
 func init() {
 	// 添加阿里云命令到查询命令组
 	queryCmd.AddCommand(aliyunCmd)
@@ -406,6 +546,11 @@ func init() {
 	aliyunCmd.AddCommand(aliyunRDSCmd)
 	aliyunRDSCmd.AddCommand(aliyunRDSListCmd)
 	aliyunRDSCmd.AddCommand(aliyunRDSGetCmd)
+
+	// 添加 OSS 命令
+	aliyunCmd.AddCommand(aliyunOSSCmd)
+	aliyunOSSCmd.AddCommand(aliyunOSSListCmd)
+	aliyunOSSCmd.AddCommand(aliyunOSSGetCmd)
 
 	// 通用标志
 	aliyunCmd.PersistentFlags().StringVarP(&aliyunAccount, "account", "a", "", "指定账号名称 (默认: 使用第一个启用的账号)")

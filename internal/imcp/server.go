@@ -42,13 +42,19 @@ func (s *MCPServer) registerTools() {
 	// 1. search_ecs_by_ip - 根据 IP 搜索 ECS 实例
 	s.mcpServer.AddTool(
 		mcp.NewTool("search_ecs_by_ip",
-			mcp.WithDescription("根据 IP 地址搜索阿里云 ECS 实例(支持私网 IP 和公网 IP)"),
+			mcp.WithDescription("根据 IP 地址精确搜索阿里云 ECS 实例(支持私网 IP、公网 IP 和弹性 IP)"),
 			mcp.WithString("ip",
 				mcp.Required(),
 				mcp.Description("要搜索的 IP 地址"),
 			),
 			mcp.WithString("account",
-				mcp.Description("阿里云账号名称(可选,默认使用 default 账号)"),
+				mcp.Description("阿里云账号名称(可选,默认使用第一个可用账号)"),
+			),
+			mcp.WithString("region",
+				mcp.Description("区域(可选,默认使用配置的第一个区域)"),
+			),
+			mcp.WithString("ip_type",
+				mcp.Description("IP 类型: private(内网 IP), public(公网 IP), eip(弹性 IP), 不指定则自动尝试所有类型"),
 			),
 		),
 		s.handleSearchECSByIP,
@@ -57,13 +63,16 @@ func (s *MCPServer) registerTools() {
 	// 2. search_ecs_by_name - 根据名称搜索 ECS 实例
 	s.mcpServer.AddTool(
 		mcp.NewTool("search_ecs_by_name",
-			mcp.WithDescription("根据实例名称搜索阿里云 ECS 实例"),
+			mcp.WithDescription("根据实例名称精确搜索阿里云 ECS 实例(支持精确匹配)"),
 			mcp.WithString("name",
 				mcp.Required(),
-				mcp.Description("实例名称"),
+				mcp.Description("实例名称(精确匹配)"),
 			),
 			mcp.WithString("account",
 				mcp.Description("阿里云账号名称(可选)"),
+			),
+			mcp.WithString("region",
+				mcp.Description("区域(可选)"),
 			),
 		),
 		s.handleSearchECSByName,
@@ -72,12 +81,18 @@ func (s *MCPServer) registerTools() {
 	// 3. list_ecs - 列出所有 ECS 实例
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_ecs",
-			mcp.WithDescription("列出所有阿里云 ECS 实例"),
+			mcp.WithDescription("列出阿里云 ECS 实例,支持按状态和计费方式筛选"),
 			mcp.WithString("account",
 				mcp.Description("阿里云账号名称(可选)"),
 			),
 			mcp.WithString("region",
 				mcp.Description("区域(可选)"),
+			),
+			mcp.WithString("status",
+				mcp.Description("实例状态(可选): Pending, Running, Starting, Stopping, Stopped"),
+			),
+			mcp.WithString("instance_charge_type",
+				mcp.Description("计费方式(可选): PostPaid(按量付费), PrePaid(包年包月)"),
 			),
 		),
 		s.handleListECS,
@@ -125,6 +140,32 @@ func (s *MCPServer) registerTools() {
 			),
 		),
 		s.handleSearchRDSByName,
+	)
+
+	// 7. list_oss - 列出所有 OSS 存储桶
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_oss",
+			mcp.WithDescription("列出所有阿里云 OSS 存储桶"),
+			mcp.WithString("account",
+				mcp.Description("阿里云账号名称(可选)"),
+			),
+		),
+		s.handleListOSS,
+	)
+
+	// 8. get_oss - 获取 OSS 存储桶详情
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_oss",
+			mcp.WithDescription("获取指定 OSS 存储桶的详细信息"),
+			mcp.WithString("bucket_name",
+				mcp.Required(),
+				mcp.Description("存储桶名称"),
+			),
+			mcp.WithString("account",
+				mcp.Description("阿里云账号名称(可选)"),
+			),
+		),
+		s.handleGetOSS,
 	)
 
 	// ==================== 腾讯云 CVM 工具 ====================
@@ -217,6 +258,34 @@ func (s *MCPServer) registerTools() {
 			),
 		),
 		s.handleSearchCDBByName,
+	)
+
+	// ==================== 腾讯云 COS 工具 ====================
+
+	// 13. list_cos - 列出腾讯云 COS 存储桶
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_cos",
+			mcp.WithDescription("列出所有腾讯云 COS 存储桶"),
+			mcp.WithString("account",
+				mcp.Description("腾讯云账号名称(可选)"),
+			),
+		),
+		s.handleListCOS,
+	)
+
+	// 14. get_cos - 获取腾讯云 COS 存储桶详情
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_cos",
+			mcp.WithDescription("获取指定腾讯云 COS 存储桶的详细信息"),
+			mcp.WithString("bucket_name",
+				mcp.Required(),
+				mcp.Description("存储桶名称"),
+			),
+			mcp.WithString("account",
+				mcp.Description("腾讯云账号名称(可选)"),
+			),
+		),
+		s.handleGetCOS,
 	)
 
 	// ==================== Jenkins 工具 ====================
@@ -314,6 +383,12 @@ func (s *MCPServer) CallTool(ctx context.Context, toolName string, arguments map
 	case "search_rds_by_name":
 		return s.handleSearchRDSByName(ctx, request)
 
+	// 阿里云 OSS
+	case "list_oss":
+		return s.handleListOSS(ctx, request)
+	case "get_oss":
+		return s.handleGetOSS(ctx, request)
+
 	// 腾讯云 CVM
 	case "search_cvm_by_ip":
 		return s.handleSearchCVMByIP(ctx, request)
@@ -329,6 +404,12 @@ func (s *MCPServer) CallTool(ctx context.Context, toolName string, arguments map
 		return s.handleListCDB(ctx, request)
 	case "search_cdb_by_name":
 		return s.handleSearchCDBByName(ctx, request)
+
+	// 腾讯云 COS
+	case "list_cos":
+		return s.handleListCOS(ctx, request)
+	case "get_cos":
+		return s.handleGetCOS(ctx, request)
 
 	// Jenkins
 	case "list_jenkins_jobs":

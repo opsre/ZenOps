@@ -7,6 +7,7 @@ import (
 	"cnb.cool/zhiqiangwang/pkg/logx"
 	"github.com/eryajf/zenops/internal/model"
 	"github.com/eryajf/zenops/internal/provider"
+	"github.com/eryajf/zenops/internal/provider/aliyun"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -23,58 +24,21 @@ func (s *MCPServer) handleSearchECSByIP(ctx context.Context, request mcp.CallToo
 	}
 
 	accountName, _ := args["account"].(string)
+	region, _ := args["region"].(string)
+	ipType, _ := args["ip_type"].(string) // private, public, eip
 
-	p, aliyunConfig, err := s.getAliyunProvider(accountName)
+	client, aliyunConfig, err := s.getAliyunClient(accountName, region)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	var matchedInstances []*model.Instance
-	pageNum := 1
-	pageSize := 100
-
-	for {
-		opts := &provider.QueryOptions{
-			PageSize: pageSize,
-			PageNum:  pageNum,
-		}
-
-		instances, err := p.ListInstances(ctx, opts)
-		if err != nil {
-			logx.Error("Failed to list instances: %v", err)
-			break
-		}
-
-		for _, inst := range instances {
-			matched := false
-			for _, privateIP := range inst.PrivateIP {
-				if privateIP == ip {
-					matchedInstances = append(matchedInstances, inst)
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				for _, publicIP := range inst.PublicIP {
-					if publicIP == ip {
-						matchedInstances = append(matchedInstances, inst)
-						break
-					}
-				}
-			}
-		}
-
-		if len(instances) < pageSize {
-			break
-		}
-		pageNum++
+	// 使用增强的 IP 查询功能
+	instance, err := client.GetECSInstanceByIP(ctx, ip, ipType)
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf("未找到 IP 为 %s 的 ECS 实例: %v", ip, err)), nil
 	}
 
-	if len(matchedInstances) == 0 {
-		return mcp.NewToolResultText(fmt.Sprintf("未找到 IP 为 %s 的 ECS 实例", ip)), nil
-	}
-
-	result := formatInstances(matchedInstances, aliyunConfig.Name)
+	result := formatInstances([]*model.Instance{instance}, aliyunConfig.Name)
 	return mcp.NewToolResultText(result), nil
 }
 
@@ -91,45 +55,20 @@ func (s *MCPServer) handleSearchECSByName(ctx context.Context, request mcp.CallT
 	}
 
 	accountName, _ := args["account"].(string)
+	region, _ := args["region"].(string)
 
-	p, aliyunConfig, err := s.getAliyunProvider(accountName)
+	client, aliyunConfig, err := s.getAliyunClient(accountName, region)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	var matchedInstances []*model.Instance
-	pageNum := 1
-	pageSize := 100
-
-	for {
-		opts := &provider.QueryOptions{
-			PageSize: pageSize,
-			PageNum:  pageNum,
-		}
-
-		instances, err := p.ListInstances(ctx, opts)
-		if err != nil {
-			logx.Error("Failed to list instances: %v", err)
-			break
-		}
-
-		for _, inst := range instances {
-			if inst.Name == name {
-				matchedInstances = append(matchedInstances, inst)
-			}
-		}
-
-		if len(instances) < pageSize {
-			break
-		}
-		pageNum++
+	// 使用增强的名称查询功能
+	instance, err := client.GetECSInstanceByName(ctx, name)
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf("未找到名称为 %s 的 ECS 实例: %v", name, err)), nil
 	}
 
-	if len(matchedInstances) == 0 {
-		return mcp.NewToolResultText(fmt.Sprintf("未找到名称为 %s 的 ECS 实例", name)), nil
-	}
-
-	result := formatInstances(matchedInstances, aliyunConfig.Name)
+	result := formatInstances([]*model.Instance{instance}, aliyunConfig.Name)
 	return mcp.NewToolResultText(result), nil
 }
 
@@ -142,26 +81,30 @@ func (s *MCPServer) handleListECS(ctx context.Context, request mcp.CallToolReque
 
 	accountName, _ := args["account"].(string)
 	region, _ := args["region"].(string)
+	status, _ := args["status"].(string)
+	chargeType, _ := args["instance_charge_type"].(string)
 
-	p, aliyunConfig, err := s.getAliyunProvider(accountName)
+	client, aliyunConfig, err := s.getAliyunClient(accountName, region)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
+	// 使用增强的查询参数
 	var allInstances []*model.Instance
 	pageNum := 1
 	pageSize := 100
 
 	for {
-		opts := &provider.QueryOptions{
-			Region:   region,
-			PageSize: pageSize,
-			PageNum:  pageNum,
+		params := &aliyun.ECSQueryParams{
+			Status:             status,
+			InstanceChargeType: chargeType,
+			PageSize:           pageSize,
+			PageNum:            pageNum,
 		}
 
-		instances, err := p.ListInstances(ctx, opts)
+		instances, err := client.QueryECSInstances(ctx, params)
 		if err != nil {
-			logx.Error("Failed to list instances: %v", err)
+			logx.Error("Failed to query instances: %v", err)
 			break
 		}
 

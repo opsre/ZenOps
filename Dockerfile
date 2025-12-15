@@ -20,4 +20,4 @@ COPY bin/${BINARY_NAME}_${TARGETOS}_${TARGETARCH} ./${BINARY_NAME}
 
 RUN chmod +x ./${BINARY_NAME}
 
-ENTRYPOINT [ "/app/${BINARY_NAME}", "run" ]
+ENTRYPOINT [ "/app/zenops", "run" ]

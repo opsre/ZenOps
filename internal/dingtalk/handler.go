@@ -17,7 +17,6 @@ import (
 // MessageHandler 消息处理器
 type MessageHandler struct {
 	client    *Client
-	crypto    *CallbackCrypto
 	parser    *IntentParser
 	mcpServer *imcp.MCPServer
 	config    *config.Config
@@ -123,13 +122,13 @@ func (h *MessageHandler) processQueryAsync(ctx context.Context, msg *CallbackMes
 	streamID := fmt.Sprintf("stream_%s_%d", msg.MsgID, time.Now().Unix())
 
 	// 发送进度消息
-	h.streamMgr.Send(ctx, msg.ConversationID, streamID, "⏳ 正在连接服务...\n\n", false)
+	_ = h.streamMgr.Send(ctx, msg.ConversationID, streamID, "⏳ 正在连接服务...\n\n", false)
 
 	// 调用 MCP 工具
 	result, err := h.callMCPTool(ctx, intent)
 	if err != nil {
 		logx.Error("Failed to call MCP tool: %v", err)
-		h.streamMgr.Send(ctx, msg.ConversationID, streamID,
+		_ = h.streamMgr.Send(ctx, msg.ConversationID, streamID,
 			fmt.Sprintf("❌ 查询失败: %v", err), true)
 		return
 	}
@@ -138,7 +137,7 @@ func (h *MessageHandler) processQueryAsync(ctx context.Context, msg *CallbackMes
 	formatted := h.formatResult(intent, result)
 
 	// 流式发送结果
-	h.streamMgr.SendInChunks(ctx, msg.ConversationID, streamID, formatted)
+	_ = h.streamMgr.SendInChunks(ctx, msg.ConversationID, streamID, formatted)
 }
 
 // callMCPTool 调用 MCP 工具
@@ -230,13 +229,13 @@ func (h *MessageHandler) processLLMWithStream(ctx context.Context, msg *Callback
 	streamID := fmt.Sprintf("llm_stream_%s_%d", msg.MsgID, time.Now().Unix())
 
 	// 发送初始消息
-	h.streamMgr.Send(ctx, msg.ConversationID, streamID, "🤖 正在思考...\n\n", false)
+	_ = h.streamMgr.Send(ctx, msg.ConversationID, streamID, "🤖 正在思考...\n\n", false)
 
 	// 调用 LLM 流式对话
 	responseCh, err := h.llmClient.ChatWithToolsAndStream(ctx, userMessage)
 	if err != nil {
 		logx.Error("Failed to call LLM: %v", err)
-		h.streamMgr.Send(ctx, msg.ConversationID, streamID,
+		_ = h.streamMgr.Send(ctx, msg.ConversationID, streamID,
 			fmt.Sprintf("❌ LLM 调用失败: %v", err), true)
 		return
 	}
@@ -253,13 +252,13 @@ func (h *MessageHandler) processLLMWithStream(ctx context.Context, msg *Callback
 		fullResponse.WriteString(content)
 		// 每接收一定量内容就发送一次更新
 		if fullResponse.Len()-headerLen > 500 {
-			h.streamMgr.Send(ctx, msg.ConversationID, streamID, fullResponse.String(), false)
+			_ = h.streamMgr.Send(ctx, msg.ConversationID, streamID, fullResponse.String(), false)
 		}
 	}
 
 	// 发送最终内容
 	fullResponse.WriteString(fmt.Sprintf("\n\n---\n⏰ %s", time.Now().Format("2006-01-02 15:04:05")))
-	h.streamMgr.Send(ctx, msg.ConversationID, streamID, fullResponse.String(), true)
+	_ = h.streamMgr.Send(ctx, msg.ConversationID, streamID, fullResponse.String(), true)
 
 	logx.Info("LLM conversation completed user %s", msg.SenderNick)
 }
@@ -340,7 +339,7 @@ func (h *MessageHandler) processLLMWithStreamCard(ctx context.Context, msg *Call
 	if err != nil {
 		logx.Error("Failed to call LLM %v", err)
 		errorMsg := fmt.Sprintf("**%s**\n\n❌ 调用失败: %v", userMessage, err)
-		h.client.UpdateAIStreamCardWithError(trackID, errorMsg)
+		_ = h.client.UpdateAIStreamCardWithError(trackID, errorMsg)
 		return
 	}
 
@@ -388,5 +387,4 @@ func (h *MessageHandler) processLLMWithStreamCard(ctx context.Context, msg *Call
 		}
 	}
 
-	logx.Info("LLM conversation with stream card completed user %s", msg.SenderNick)
 }

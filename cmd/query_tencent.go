@@ -391,6 +391,167 @@ func getTencentConfig(accountName string) (*config.ProviderConfig, error) {
 	return nil, fmt.Errorf("tencent account '%s' not found", accountName)
 }
 
+// tencentCOSCmd COS 命令组
+var tencentCOSCmd = &cobra.Command{
+	Use:   "cos",
+	Short: "查询腾讯云 COS 存储桶",
+	Long:  `查询腾讯云 COS 存储桶列表和详情。`,
+}
+
+// tencentCOSListCmd 列出 COS 存储桶
+var tencentCOSListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "列出 COS 存储桶",
+	Long:  `列出腾讯云 COS 存储桶列表。`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+
+		// 获取指定账号的配置
+		tencentConfig, err := getTencentConfig(tencentAccount)
+		if err != nil {
+			return err
+		}
+
+		// 获取 Tencent Provider
+		p, err := provider.GetProvider("tencent")
+		if err != nil {
+			return fmt.Errorf("failed to get tencent provider: %w", err)
+		}
+
+		// 初始化 Provider
+		providerConfig := map[string]any{
+			"secret_id":  tencentConfig.AK,
+			"secret_key": tencentConfig.SK,
+			"regions":    interfaceSlice(tencentConfig.Regions),
+		}
+
+		if err := p.Initialize(providerConfig); err != nil {
+			return fmt.Errorf("failed to initialize tencent provider: %w", err)
+		}
+
+		var buckets []*model.OSSBucket
+
+		// 判断是否获取所有资源
+		if tencentFetchAll {
+			pageNum := 1
+			pageSize := tencentPageSize
+			if pageSize <= 0 {
+				pageSize = 100
+			}
+
+			logx.Info("Fetching all COS buckets, account %s", tencentConfig.Name)
+
+			for {
+				opts := &provider.QueryOptions{
+					Region:   tencentRegion,
+					PageSize: pageSize,
+					PageNum:  pageNum,
+				}
+
+				pageBuckets, err := p.ListOSSBuckets(ctx, opts)
+				if err != nil {
+					return fmt.Errorf("failed to list COS buckets (page %d): %w", pageNum, err)
+				}
+
+				buckets = append(buckets, pageBuckets...)
+
+				if len(pageBuckets) < pageSize {
+					break
+				}
+
+				pageNum++
+				logx.Debug("Fetching next page, page: %d, current_total: %d", pageNum, len(buckets))
+			}
+		} else {
+			opts := &provider.QueryOptions{
+				Region:   tencentRegion,
+				PageSize: tencentPageSize,
+				PageNum:  tencentPageNum,
+			}
+
+			buckets, err = p.ListOSSBuckets(ctx, opts)
+			if err != nil {
+				return fmt.Errorf("failed to list COS buckets: %w", err)
+			}
+		}
+
+		// 输出结果
+		if tencentOutputType == "json" {
+			data, _ := json.MarshalIndent(buckets, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			// 使用 lipgloss/table 表格输出
+			rows := [][]string{}
+
+			for _, bucket := range buckets {
+				rows = append(rows, []string{
+					bucket.Name, bucket.Region, bucket.StorageClass,
+					bucket.CreatedAt, bucket.ACL,
+				})
+			}
+
+			t := table.New().
+				Border(lipgloss.NormalBorder()).
+				BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("99"))).
+				Headers("Name", "Region", "Storage Class", "Created At", "ACL").
+				Rows(rows...)
+
+			fmt.Println(t)
+			fmt.Println()
+			logx.Info("Query completed, count %d, account %s", len(buckets), tencentConfig.Name)
+		}
+
+		return nil
+	},
+}
+
+// tencentCOSGetCmd 获取 COS 存储桶详情
+var tencentCOSGetCmd = &cobra.Command{
+	Use:   "get <bucket-name>",
+	Short: "获取 COS 存储桶详情",
+	Long:  `获取指定 COS 存储桶的详细信息。`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		bucketName := args[0]
+		ctx := context.Background()
+
+		// 获取指定账号的配置
+		tencentConfig, err := getTencentConfig(tencentAccount)
+		if err != nil {
+			return err
+		}
+
+		// 获取 Tencent Provider
+		p, err := provider.GetProvider("tencent")
+		if err != nil {
+			return fmt.Errorf("failed to get tencent provider: %w", err)
+		}
+
+		// 初始化 Provider
+		providerConfig := map[string]any{
+			"secret_id":  tencentConfig.AK,
+			"secret_key": tencentConfig.SK,
+			"regions":    interfaceSlice(tencentConfig.Regions),
+		}
+
+		if err := p.Initialize(providerConfig); err != nil {
+			return fmt.Errorf("failed to initialize tencent provider: %w", err)
+		}
+
+		// 获取存储桶详情
+		bucket, err := p.GetOSSBucket(ctx, bucketName)
+		if err != nil {
+			return fmt.Errorf("failed to get COS bucket: %w", err)
+		}
+
+		// 输出结果
+		data, _ := json.MarshalIndent(bucket, "", "  ")
+		fmt.Println(string(data))
+
+		return nil
+	},
+}
+
 func init() {
 	// 添加腾讯云命令到查询命令组
 	queryCmd.AddCommand(tencentCmd)
@@ -404,6 +565,11 @@ func init() {
 	tencentCmd.AddCommand(tencentCDBCmd)
 	tencentCDBCmd.AddCommand(tencentCDBListCmd)
 	tencentCDBCmd.AddCommand(tencentCDBGetCmd)
+
+	// 添加 COS 命令
+	tencentCmd.AddCommand(tencentCOSCmd)
+	tencentCOSCmd.AddCommand(tencentCOSListCmd)
+	tencentCOSCmd.AddCommand(tencentCOSGetCmd)
 
 	// 通用标志
 	tencentCmd.PersistentFlags().StringVarP(&tencentAccount, "account", "a", "", "指定账号名称 (默认: 使用第一个启用的账号)")

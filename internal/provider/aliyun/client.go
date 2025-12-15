@@ -3,11 +3,11 @@ package aliyun
 import (
 	"fmt"
 
-	openapiv1 "github.com/alibabacloud-go/darabonba-openapi/client"
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	ecs "github.com/alibabacloud-go/ecs-20140526/v4/client"
-	rds "github.com/alibabacloud-go/rds-20140815/v2/client"
+	rds "github.com/alibabacloud-go/rds-20140815/v14/client"
 	"github.com/alibabacloud-go/tea/tea"
+	oss "github.com/aliyun/aliyun-oss-go-sdk/oss"
 )
 
 // Client 阿里云客户端
@@ -17,6 +17,7 @@ type Client struct {
 	Region          string
 	ecsClient       *ecs.Client
 	rdsClient       *rds.Client
+	ossClient       *oss.Client
 }
 
 // NewClient 创建阿里云客户端
@@ -70,7 +71,7 @@ func (c *Client) GetRDSClient() (*rds.Client, error) {
 	endpoint := fmt.Sprintf("rds.%s.aliyuncs.com", c.Region)
 
 	// RDS v2 使用旧版 openapi config
-	config := &openapiv1.Config{
+	config := &openapi.Config{
 		AccessKeyId:     tea.String(c.AccessKeyID),
 		AccessKeySecret: tea.String(c.AccessKeySecret),
 		Endpoint:        tea.String(endpoint),
@@ -82,5 +83,24 @@ func (c *Client) GetRDSClient() (*rds.Client, error) {
 	}
 
 	c.rdsClient = client
+	return client, nil
+}
+
+// GetOSSClient 获取 OSS 客户端
+func (c *Client) GetOSSClient() (*oss.Client, error) {
+	if c.ossClient != nil {
+		return c.ossClient, nil
+	}
+
+	// OSS 使用全局 endpoint (不带region前缀)
+	// ListBuckets 等全局操作需要使用全局endpoint
+	endpoint := "https://oss-cn-hangzhou.aliyuncs.com"
+
+	client, err := oss.New(endpoint, c.AccessKeyID, c.AccessKeySecret)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OSS client: %w", err)
+	}
+
+	c.ossClient = client
 	return client, nil
 }

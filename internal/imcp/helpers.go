@@ -7,6 +7,7 @@ import (
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/model"
 	"github.com/eryajf/zenops/internal/provider"
+	"github.com/eryajf/zenops/internal/provider/aliyun"
 )
 
 // ==================== Provider 辅助函数 ====================
@@ -37,6 +38,28 @@ func (s *MCPServer) getAliyunProvider(accountName string) (provider.Provider, *c
 	}
 
 	return p, aliyunConfig, nil
+}
+
+// getAliyunClient 直接获取阿里云客户端（用于高级查询）
+func (s *MCPServer) getAliyunClient(accountName string, region string) (*aliyun.Client, *config.ProviderConfig, error) {
+	// 获取账号配置
+	aliyunConfig, err := getAliyunConfigByName(s.config, accountName)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// 如果没有指定 region，使用第一个配置的 region
+	if region == "" && len(aliyunConfig.Regions) > 0 {
+		region = aliyunConfig.Regions[0]
+	}
+
+	// 创建阿里云客户端
+	aliyunClient, err := aliyun.NewClient(aliyunConfig.AK, aliyunConfig.SK, region)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create aliyun client: %w", err)
+	}
+
+	return aliyunClient, aliyunConfig, nil
 }
 
 // getTencentProvider 获取腾讯云 Provider

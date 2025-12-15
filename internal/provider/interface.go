@@ -26,6 +26,12 @@ type Provider interface {
 	// GetDatabase 获取数据库详情
 	GetDatabase(ctx context.Context, dbID string) (*model.Database, error)
 
+	// ListOSSBuckets 列出对象存储桶
+	ListOSSBuckets(ctx context.Context, opts *QueryOptions) ([]*model.OSSBucket, error)
+
+	// GetOSSBucket 获取对象存储桶详情
+	GetOSSBucket(ctx context.Context, bucketName string) (*model.OSSBucket, error)
+
 	// HealthCheck 健康检查
 	HealthCheck(ctx context.Context) error
 }

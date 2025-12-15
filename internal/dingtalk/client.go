@@ -73,7 +73,7 @@ func (c *Client) GetAccessToken(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get access token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -196,7 +196,7 @@ func (c *Client) sendRequest(ctx context.Context, url string, payload any) error
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -246,7 +246,7 @@ func (c *Client) GetUserInfo(ctx context.Context, userID string) (map[string]any
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user info: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

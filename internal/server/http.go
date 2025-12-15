@@ -11,6 +11,7 @@ import (
 	"github.com/eryajf/zenops/internal/imcp"
 	"github.com/eryajf/zenops/internal/model"
 	"github.com/eryajf/zenops/internal/provider"
+	aliyunprovider "github.com/eryajf/zenops/internal/provider/aliyun"
 	"github.com/gin-gonic/gin"
 )
 
@@ -120,6 +121,10 @@ func (s *HTTPGinServer) registerRoutes() {
 			// RDS
 			aliyun.GET("/rds/list", s.handleAliyunRDSList)
 			aliyun.GET("/rds/search", s.handleAliyunRDSSearch)
+
+			// OSS
+			aliyun.GET("/oss/list", s.handleAliyunOSSList)
+			aliyun.GET("/oss/get", s.handleAliyunOSSGet)
 		}
 
 		// 腾讯云路由
@@ -133,6 +138,10 @@ func (s *HTTPGinServer) registerRoutes() {
 			// CDB
 			tencent.GET("/cdb/list", s.handleTencentCDBList)
 			tencent.GET("/cdb/search", s.handleTencentCDBSearch)
+
+			// COS
+			tencent.GET("/cos/list", s.handleTencentCOSList)
+			tencent.GET("/cos/get", s.handleTencentCOSGet)
 		}
 
 		// Jenkins 路由
@@ -526,6 +535,98 @@ func (s *HTTPGinServer) handleAliyunRDSSearch(c *gin.Context) {
 	})
 }
 
+// ==================== 阿里云 OSS API ====================
+
+func (s *HTTPGinServer) handleAliyunOSSList(c *gin.Context) {
+	accountName := c.Query("account")
+
+	aliyunConfig, err := getAliyunConfigByName(s.config, accountName)
+	if err != nil {
+		s.error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// 创建临时客户端
+	var ossClient interface{ ListOSSBuckets(context.Context, int, int, map[string]string) ([]*model.OSSBucket, error) }
+	for _, region := range aliyunConfig.Regions {
+		c, err := createAliyunClient(aliyunConfig.AK, aliyunConfig.SK, region)
+		if err == nil {
+			ossClient = c
+			break
+		}
+	}
+	if ossClient == nil {
+		s.error(c, http.StatusInternalServerError, "Failed to create OSS client")
+		return
+	}
+
+	var allBuckets []*model.OSSBucket
+	pageNum := 1
+	pageSize := 100
+
+	for {
+		buckets, err := ossClient.ListOSSBuckets(c.Request.Context(), pageSize, pageNum, nil)
+		if err != nil {
+			s.error(c, http.StatusInternalServerError, fmt.Sprintf("Failed to list OSS buckets: %v", err))
+			return
+		}
+
+		allBuckets = append(allBuckets, buckets...)
+
+		if len(buckets) < pageSize {
+			break
+		}
+		pageNum++
+	}
+
+	s.success(c, gin.H{
+		"total":   len(allBuckets),
+		"buckets": allBuckets,
+		"account": aliyunConfig.Name,
+	})
+}
+
+func (s *HTTPGinServer) handleAliyunOSSGet(c *gin.Context) {
+	accountName := c.Query("account")
+	bucketName := c.Query("bucket_name")
+
+	if bucketName == "" {
+		s.error(c, http.StatusBadRequest, "bucket_name is required")
+		return
+	}
+
+	aliyunConfig, err := getAliyunConfigByName(s.config, accountName)
+	if err != nil {
+		s.error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// 创建临时客户端
+	var ossClient interface{ GetOSSBucket(context.Context, string) (*model.OSSBucket, error) }
+	for _, region := range aliyunConfig.Regions {
+		c, err := createAliyunClient(aliyunConfig.AK, aliyunConfig.SK, region)
+		if err == nil {
+			ossClient = c
+			break
+		}
+	}
+	if ossClient == nil {
+		s.error(c, http.StatusInternalServerError, "Failed to create OSS client")
+		return
+	}
+
+	bucket, err := ossClient.GetOSSBucket(c.Request.Context(), bucketName)
+	if err != nil {
+		s.error(c, http.StatusNotFound, fmt.Sprintf("Failed to get OSS bucket: %v", err))
+		return
+	}
+
+	s.success(c, gin.H{
+		"bucket":  bucket,
+		"account": aliyunConfig.Name,
+	})
+}
+
 // ==================== 腾讯云 CVM API ====================
 
 func (s *HTTPGinServer) handleTencentCVMList(c *gin.Context) {
@@ -852,6 +953,109 @@ func (s *HTTPGinServer) handleTencentCDBSearch(c *gin.Context) {
 	})
 }
 
+// ==================== 腾讯云 COS API ====================
+
+func (s *HTTPGinServer) handleTencentCOSList(c *gin.Context) {
+	accountName := c.Query("account")
+
+	tencentConfig, err := getTencentConfigByName(s.config, accountName)
+	if err != nil {
+		s.error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	p, err := provider.GetProvider("tencent")
+	if err != nil {
+		s.error(c, http.StatusInternalServerError, fmt.Sprintf("Failed to get provider: %v", err))
+		return
+	}
+
+	providerConfig := map[string]any{
+		"secret_id":  tencentConfig.AK,
+		"secret_key": tencentConfig.SK,
+		"regions":    interfaceSlice(tencentConfig.Regions),
+	}
+
+	if err := p.Initialize(providerConfig); err != nil {
+		s.error(c, http.StatusInternalServerError, fmt.Sprintf("Failed to initialize provider: %v", err))
+		return
+	}
+
+	var allBuckets []*model.OSSBucket
+	pageNum := 1
+	pageSize := 100
+
+	for {
+		opts := &provider.QueryOptions{
+			PageSize: pageSize,
+			PageNum:  pageNum,
+		}
+
+		buckets, err := p.ListOSSBuckets(c.Request.Context(), opts)
+		if err != nil {
+			s.error(c, http.StatusInternalServerError, fmt.Sprintf("Failed to list COS buckets: %v", err))
+			return
+		}
+
+		allBuckets = append(allBuckets, buckets...)
+
+		if len(buckets) < pageSize {
+			break
+		}
+		pageNum++
+	}
+
+	s.success(c, gin.H{
+		"total":   len(allBuckets),
+		"buckets": allBuckets,
+		"account": tencentConfig.Name,
+	})
+}
+
+func (s *HTTPGinServer) handleTencentCOSGet(c *gin.Context) {
+	accountName := c.Query("account")
+	bucketName := c.Query("bucket_name")
+
+	if bucketName == "" {
+		s.error(c, http.StatusBadRequest, "bucket_name is required")
+		return
+	}
+
+	tencentConfig, err := getTencentConfigByName(s.config, accountName)
+	if err != nil {
+		s.error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	p, err := provider.GetProvider("tencent")
+	if err != nil {
+		s.error(c, http.StatusInternalServerError, fmt.Sprintf("Failed to get provider: %v", err))
+		return
+	}
+
+	providerConfig := map[string]any{
+		"secret_id":  tencentConfig.AK,
+		"secret_key": tencentConfig.SK,
+		"regions":    interfaceSlice(tencentConfig.Regions),
+	}
+
+	if err := p.Initialize(providerConfig); err != nil {
+		s.error(c, http.StatusInternalServerError, fmt.Sprintf("Failed to initialize provider: %v", err))
+		return
+	}
+
+	bucket, err := p.GetOSSBucket(c.Request.Context(), bucketName)
+	if err != nil {
+		s.error(c, http.StatusNotFound, fmt.Sprintf("Failed to get COS bucket: %v", err))
+		return
+	}
+
+	s.success(c, gin.H{
+		"bucket":  bucket,
+		"account": tencentConfig.Name,
+	})
+}
+
 // ==================== Jenkins API ====================
 
 func (s *HTTPGinServer) handleJenkinsJobList(c *gin.Context) {
@@ -1019,4 +1223,9 @@ func interfaceSlice(s []string) []any {
 		result[i] = v
 	}
 	return result
+}
+
+// createAliyunClient 创建阿里云客户端
+func createAliyunClient(ak, sk, region string) (*aliyunprovider.Client, error) {
+	return aliyunprovider.NewClient(ak, sk, region)
 }

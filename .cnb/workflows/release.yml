@@ -1,0 +1,45 @@
+$:
+  tag_push:
+    - runner:
+        cpus: 8
+      services:
+        - docker
+        - git-clone-yyds
+      env:
+        IMAGE_NAME: "zenops"
+        DOCKERHUB_USERNAME: eryajf
+        ALIHUB_URL: registry.cn-hangzhou.aliyuncs.com
+        ALIHUB_USERNAME: eryajf
+        ALIHUB_IMAGE_REPONAME: eryajf
+      imports:
+        - https://cnb.cool/eryajf/build-env/-/blob/main/env.yaml
+      stages:
+        - name: 📦 构建制品
+          timeout: 3h
+          image: docker.cnb.cool/znb/images/debian:new
+          script: |
+            make gox-all
+        - name: release upload attachments
+          timeout: 3h
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - ./bin/*
+        - name: 🐋 推送镜像
+          timeout: 3h
+          script: |
+            docker login -u ${ALIHUB_USERNAME} -p ${ALIHUB_TOKEN} ${ALIHUB_URL}
+            docker run -d --name buildkitd \
+              --security-opt seccomp=unconfined \
+              --security-opt apparmor=unconfined \
+              --security-opt systempaths=unconfined \
+              moby/buildkit:rootless
+            docker buildx create --use \
+              --name mybuilder \
+              --driver remote docker-container://buildkitd
+            docker buildx build \
+              -t ${ALIHUB_URL}/${ALIHUB_USERNAME}/${IMAGE_NAME} \
+              -t ${ALIHUB_URL}/${ALIHUB_USERNAME}/${IMAGE_NAME}:${CNB_BRANCH} \
+              -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE} \
+              -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_BRANCH} \
+              --platform=linux/arm64,linux/amd64 . --push
