@@ -3,10 +3,9 @@ package aliyun
 import (
 	"fmt"
 
-	openapiv1 "github.com/alibabacloud-go/darabonba-openapi/client"
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	ecs "github.com/alibabacloud-go/ecs-20140526/v4/client"
-	rds "github.com/alibabacloud-go/rds-20140815/v2/client"
+	rds "github.com/alibabacloud-go/rds-20140815/v14/client"
 	"github.com/alibabacloud-go/tea/tea"
 	oss "github.com/aliyun/aliyun-oss-go-sdk/oss"
 )
@@ -72,7 +71,7 @@ func (c *Client) GetRDSClient() (*rds.Client, error) {
 	endpoint := fmt.Sprintf("rds.%s.aliyuncs.com", c.Region)
 
 	// RDS v2 使用旧版 openapi config
-	config := &openapiv1.Config{
+	config := &openapi.Config{
 		AccessKeyId:     tea.String(c.AccessKeyID),
 		AccessKeySecret: tea.String(c.AccessKeySecret),
 		Endpoint:        tea.String(endpoint),

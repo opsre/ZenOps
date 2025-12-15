@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
-	rds "github.com/alibabacloud-go/rds-20140815/v2/client"
+	rds "github.com/alibabacloud-go/rds-20140815/v14/client"
 	"github.com/alibabacloud-go/tea/tea"
 	"github.com/eryajf/zenops/internal/model"
 )
