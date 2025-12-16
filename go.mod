@@ -15,6 +15,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/google/uuid v1.6.0
+	github.com/larksuite/oapi-sdk-go/v3 v3.5.1
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/open-dingtalk/dingtalk-stream-sdk-go v0.9.1
 	github.com/sashabaranov/go-openai v1.41.2
@@ -56,6 +57,7 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/goccy/go-yaml v1.19.0 // indirect
+	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

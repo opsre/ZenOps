@@ -81,7 +81,7 @@ func init() {
 // runCmd 服务命令
 var runCmd = &cobra.Command{
 	Use:   "run",
-	Short: "启动 HTTP 或 MCP 服务，同时启动钉钉Stream服务",
+	Short: "启动 HTTP 或 MCP 服务，同时启动钉钉/飞书Stream服务",
 	Long:  `启动 ZenOps 的 HTTP API 服务器或 MCP 协议服务器,或同时启动两者。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logx.Info("🧘 Starting ZenOps Server, Version %s", Version)
@@ -118,12 +118,12 @@ var runCmd = &cobra.Command{
 		// 错误通道
 		errCh := make(chan error, 3)
 
+		// 创建 MCP 服务器 (钉钉和飞书共享)
+		mcpServer := imcp.NewMCPServer(cfg)
+
 		// 启动钉钉服务 (Stream模式)
 		if cfg.DingTalk.Enabled {
 			go func() {
-				// 创建MCP服务器
-				mcpServer := imcp.NewMCPServer(cfg)
-
 				// 创建钉钉服务
 				dingTalkService, err := server.NewDingTalkService(cfg, mcpServer)
 				if err != nil {
@@ -134,6 +134,24 @@ var runCmd = &cobra.Command{
 				// 启动钉钉服务
 				if err := dingTalkService.Start(ctx); err != nil {
 					errCh <- fmt.Errorf("dingtalk service error: %w", err)
+					return
+				}
+			}()
+		}
+
+		// 启动飞书服务 (Stream模式)
+		if cfg.Feishu.Enabled {
+			go func() {
+				// 创建飞书服务
+				feishuService, err := server.NewFeishuStreamServer(cfg, mcpServer)
+				if err != nil {
+					errCh <- fmt.Errorf("failed to create feishu service: %w", err)
+					return
+				}
+
+				// 启动飞书服务
+				if err := feishuService.Start(); err != nil {
+					errCh <- fmt.Errorf("feishu service error: %w", err)
 					return
 				}
 			}()
@@ -168,7 +186,7 @@ var runCmd = &cobra.Command{
 		}
 
 		// 如果没有任何服务启动，给出提示
-		if !startHTTP && !startMCP && !cfg.DingTalk.Enabled {
+		if !startHTTP && !startMCP && !cfg.DingTalk.Enabled && !cfg.Feishu.Enabled {
 			logx.Warn("⚠️  No services enabled. Please check your configuration or use --http-only or --mcp-only flags.")
 		}
 

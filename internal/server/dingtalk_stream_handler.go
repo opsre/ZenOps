@@ -60,7 +60,7 @@ func NewDingTalkStreamHandler(cfg *config.Config, cardClient *DingTalkStreamClie
 	}
 
 	// 初始化 LLM 客户端
-	if cfg.LLM.Enabled && cfg.DingTalk.EnableLLMConversation {
+	if cfg.LLM.Enabled {
 		llmCfg := &llm.Config{
 			Model:   cfg.LLM.Model,
 			APIKey:  cfg.LLM.APIKey,
@@ -114,8 +114,8 @@ func (h *DingTalkStreamHandler) onChatBotMessage(ctx context.Context, data *chat
 		return []byte(""), nil
 	}
 
-	// 如果启用了 LLM 对话,优先使用 LLM 处理
-	if h.config.DingTalk.EnableLLMConversation && h.llmClient != nil {
+	// 如果启用了 LLM,使用 LLM 处理
+	if h.config.LLM.Enabled && h.llmClient != nil {
 		logx.Info("Using LLM to process message")
 		go h.processLLMMessage(ctx, data, content)
 		return []byte(""), nil

@@ -87,8 +87,8 @@ func (h *MessageHandler) HandleMessage(ctx context.Context, msg *CallbackMessage
 		return CreateMarkdownResponse("使用帮助", GetHelpMessage()), nil
 	}
 
-	// 如果启用了 LLM 对话,优先使用 LLM 处理
-	if h.config.DingTalk.EnableLLMConversation && h.llmClient != nil {
+	// 如果启用了 LLM,使用 LLM 处理
+	if h.config.LLM.Enabled && h.llmClient != nil {
 		// 如果启用了流式卡片,使用卡片流式交互
 		if h.config.DingTalk.CardTemplateID != "" {
 			go h.processLLMWithStreamCard(ctx, msg, userMessage)

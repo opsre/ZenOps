@@ -48,8 +48,13 @@ dingtalk:
   # 流式卡片配置
   card_template_id: ""  # AI 流式卡片模板 ID(可选,需要在钉钉开放平台创建)
 
-  # LLM 对话配置
-  enable_llm_conversation: true  # 是否启用 LLM 智能对话模式
+# 飞书配置
+feishu:
+  enabled: false  # 是否启用飞书机器人
+
+  # 飞书应用凭证
+  app_id: "cli_xxxxxxxxxxxxxxxx"      # 飞书应用的 App ID
+  app_secret: "xxxxxxxxxxxxxxxxxxxxx"  # 飞书应用的 App Secret
 
 # LLM 大模型配置
 llm:

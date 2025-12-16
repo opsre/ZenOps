@@ -6,6 +6,7 @@ type Config struct {
 	Providers ProvidersConfig `mapstructure:"providers"`
 	CICD      CICDConfig      `mapstructure:"cicd"`
 	DingTalk  DingTalkConfig  `mapstructure:"dingtalk"`
+	Feishu    FeishuConfig    `mapstructure:"feishu"`
 	LLM       LLMConfig       `mapstructure:"llm"`
 	Auth      AuthConfig      `mapstructure:"auth"`
 	Cache     CacheConfig     `mapstructure:"cache"`
@@ -69,12 +70,18 @@ type LLMConfig struct {
 
 // DingTalkConfig 钉钉配置
 type DingTalkConfig struct {
-	Enabled               bool   `mapstructure:"enabled"`
-	AppKey                string `mapstructure:"app_key"`
-	AppSecret             string `mapstructure:"app_secret"`
-	AgentID               string `mapstructure:"agent_id"`
-	CardTemplateID        string `mapstructure:"card_template_id"`        // AI 流式卡片模板 ID
-	EnableLLMConversation bool   `mapstructure:"enable_llm_conversation"` // 是否启用 LLM 对话
+	Enabled        bool   `mapstructure:"enabled"`
+	AppKey         string `mapstructure:"app_key"`
+	AppSecret      string `mapstructure:"app_secret"`
+	AgentID        string `mapstructure:"agent_id"`
+	CardTemplateID string `mapstructure:"card_template_id"` // AI 流式卡片模板 ID
+}
+
+// FeishuConfig 飞书配置
+type FeishuConfig struct {
+	Enabled   bool   `mapstructure:"enabled"`
+	AppID     string `mapstructure:"app_id"`
+	AppSecret string `mapstructure:"app_secret"`
 }
 
 // AuthConfig 认证配置
