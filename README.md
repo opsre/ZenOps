@@ -93,8 +93,8 @@ cp config.example.yaml config.yaml
 
 |   服务商   |                   地址                   |
 | :------: | :------------------------------------------: |
-|  `CNB`  | <https://cnb.cool/opsre/JenkinsGuide>  |
-| `GitHub` | <https://github.com/opsre/JenkinsGuide> |
+|  `CNB`  | <https://cnb.cool/opsre/ZenOps>  |
+| `GitHub` | <https://github.com/opsre/ZenOps> |
 
 ## 捐赠打赏
 
