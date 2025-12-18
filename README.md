@@ -9,25 +9,25 @@
 [![Eryajf WeChat](https://img.shields.io/badge/%E5%85%AC%E4%BC%97%E5%8F%B7-%E8%BF%90%E7%BB%B4%E8%89%BA%E6%9C%AF-71f9fe?logo=WeChat)](https://y.gtimg.cn/music/photo_new/T053M000003iCCnF30PTi3.jpg)
 [![Eryajf Awesome Stars](https://img.shields.io/badge/Awesome-MyStarList-c780fa?logo=Awesome-Lists)](https://github.com/eryajf/awesome-stars-eryajf#readme)
 
-<p> 🧘 ZenOps —— 运维数据智能化查询工具 </p>
+<p> 🧘 通过钉钉、飞书、企微智能机器人用自然语言查询运维资源的工具。 </p>
 
 <img src="https://cdn.jsdelivr.net/gh/eryajf/tu@main/img/image_20240420_214408.gif" width="800"  height="3">
 </div><br>
 
 <img align='right' src="./src/zenops.png" width="350" height="350" />
 
-运维领域的工具，有这样几个阶段，从最初的命令行工具，到 Web 界面交互，再到今天结合AI用自然语言交互，每一种场景都有其独特的价值。
-
-ZenOps 是一个面向运维领域的数据智能化查询工具，通过统一的接口抽象，支持多云平台(阿里云、腾讯云等云资源)、CI/CD 工具(Jenkins等各种运维领域常见工具)的资源查询，并通过 CLI、HTTP API 和 MCP 协议提供多种访问方式，同时集成钉钉，飞书(待添加)等智能机器人实现对话式查询。
+ZenOps 是一个面向运维领域的数据智能化查询工具，通过统一的接口抽象，支持多云平台(阿里云、腾讯云等云资源)、CI/CD 工具(Jenkins等各种运维领域常见工具)的资源查询，并通过 CLI、HTTP API 和 MCP 协议提供多种访问方式，同时集成钉钉、飞书、企微智能机器人实现对话式查询。
 
 
-- 🌥️ **多云支持**: 统一接口查询阿里云、腾讯云等云平台资源
-- 🔧 **CI/CD 集成**: 支持 Jenkins 等 CI/CD 工具查询
-- 🖥️ **CLI 工具**: 基于 Cobra 的命令行工具
-- 🌐 **HTTP API**: RESTful API 接口
-- 🤖 **MCP 协议**: 支持 Model Context Protocol
-- 💬 **钉钉机器人**: 对话式查询体验(回复消息支持卡片流式输出)
-- 🔌 **插件化架构**: 易于扩展新的云平台和服务
+- **多云支持**: 统一接口查询阿里云、腾讯云等云平台资源
+- **CI/CD 集成**: 支持 Jenkins 等 CI/CD 工具查询
+- **CLI 工具**: 基于 Cobra 的命令行工具
+- **HTTP API**: RESTful API 接口
+- **MCP 协议**: 支持 Model Context Protocol
+- **钉钉/飞书/企微机器人**: 对话式查询，消息支持流式输出
+- **插件化架构**: 易于扩展新的云平台和服务
+
+> 📝 快速入门上手文档：[开源项目ZenOps：带你领略禅意运维](https://wiki.eryajf.net/pages/a908c5/) ，详细介绍了mcp，钉钉，飞书，企微等联动使用的配置方法。
 
 ## 快速开始
 
@@ -68,9 +68,17 @@ cp config.example.yaml config.yaml
 
 ![](./src/mcp.webp)
 
-**通过钉钉机器人查询数据**
+**通过钉钉机器人查询数据，回复消息支持流式输出**
 
 ![](./src/dingtalk.webp)
+
+**通过飞书机器人查询数据，回复消息支持流式输出**
+
+![](./src/feishu.webp)
+
+**通过企业微信机器人查询数据，回复消息支持流式输出**
+
+![](./src/wecom.webp)
 
 ## 其他说明
 
@@ -78,6 +86,15 @@ cp config.example.yaml config.yaml
 - 如果你还有其他想法或者需求，欢迎在 issue 中交流！
 - 项目还属于早期，更多丰富的功能还在开发中，敬请期待！
 - 其中 [docs](./docs) 里的文档大部分是 AI 编码过程中生成，仅做留存，不必在意。
+
+## 项目源码
+
+可选择你熟悉的平台浏览源码：
+
+|   服务商   |                   地址                   |
+| :------: | :------------------------------------------: |
+|  `CNB`  | <https://cnb.cool/opsre/ZenOps>  |
+| `GitHub` | <https://github.com/opsre/ZenOps> |
 
 ## 捐赠打赏
 

@@ -4,6 +4,12 @@ on:
   release:
     types: [ created, published ] # 表示在创建新的 Release 时触发
 
+env:
+  GITHUB_USERNAME: eryajf
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  CNB_USERNAME: cnb
+  CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+
 jobs:
   build-release:
     runs-on: ubuntu-latest
@@ -18,6 +24,8 @@ jobs:
         uses: crazy-max/ghaction-upx@v3
         with:
           install-only: true
+      - run: |
+          echo "Building for Tag: ${{ github.ref_name }}"
       - run: go install github.com/authelia/gox@latest # setup gox
       - run: make gox-all
 
