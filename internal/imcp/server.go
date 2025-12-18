@@ -335,7 +335,10 @@ func (s *MCPServer) Start() error {
 // StartSSE 启动 MCP 服务器 (SSE 模式)
 func (s *MCPServer) StartSSE() error {
 	addr := fmt.Sprintf("0.0.0.0:%d", s.config.Server.MCP.Port)
-	logx.Info("🧰 Starting MCP Server In SSE Mode, Listening On %s", addr)
+
+	// 记录工具数量
+	tools := s.mcpServer.ListTools()
+	logx.Info("🧰 Starting MCP Server In SSE Mode, Listening On %s (Total tools: %d)", addr, len(tools))
 
 	// 创建 SSE 服务器
 	s.sseServer = server.NewSSEServer(

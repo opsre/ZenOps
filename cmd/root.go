@@ -12,6 +12,7 @@ import (
 	"cnb.cool/zhiqiangwang/pkg/logx"
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/imcp"
+	"github.com/eryajf/zenops/internal/mcpclient"
 	_ "github.com/eryajf/zenops/internal/provider/aliyun"  // 注册 aliyun provider
 	_ "github.com/eryajf/zenops/internal/provider/jenkins" // 注册 jenkins provider
 	_ "github.com/eryajf/zenops/internal/provider/tencent" // 注册 tencent provider
@@ -73,6 +74,7 @@ func init() {
 	rootCmd.Flags().BoolP("version", "v", false, "Show version information")
 
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(listToolsCmd)
 
 	runCmd.Flags().BoolVar(&httpOnly, "http-only", false, "仅启动 HTTP 服务")
 	runCmd.Flags().BoolVar(&mcpOnly, "mcp-only", false, "仅启动 MCP 服务")
@@ -118,8 +120,33 @@ var runCmd = &cobra.Command{
 		// 错误通道
 		errCh := make(chan error, 3)
 
-		// 创建 MCP 服务器 (钉钉和飞书共享)
+		// 1. 创建 MCP 客户端管理器
+		mcpClientManager := mcpclient.NewManager()
+
+		// 2. 加载外部 MCP 配置
+		if cfg.MCPServersConfig != "" {
+			logx.Info("📥 Loading external MCP servers from: %s", cfg.MCPServersConfig)
+			mcpServersConfig, err := config.LoadMCPServersConfig(cfg.MCPServersConfig)
+			if err != nil {
+				logx.Warn("⚠️  Failed to load MCP servers config: %v", err)
+			} else {
+				// 注册所有外部 MCP 客户端
+				if err := mcpClientManager.LoadFromConfig(mcpServersConfig); err != nil {
+					logx.Error("❌ Failed to load MCP clients: %v", err)
+				}
+			}
+		}
+
+		// 3. 创建 MCP 服务器 (钉钉和飞书共享)
 		mcpServer := imcp.NewMCPServer(cfg)
+
+		// 4. 注册外部 MCP 的工具 (如果启用)
+		if cfg.Server.MCP.AutoRegisterExternalTools {
+			logx.Info("🔧 Registering external MCP tools...")
+			if err := mcpServer.RegisterExternalMCPTools(ctx, mcpClientManager); err != nil {
+				logx.Error("❌ Failed to register external MCP tools: %v", err)
+			}
+		}
 
 		// 启动钉钉服务 (Stream模式)
 		if cfg.DingTalk.Enabled {
@@ -178,9 +205,7 @@ var runCmd = &cobra.Command{
 		if startMCP {
 			logx.Info("🔌 Starting MCP server...")
 			go func() {
-				// 创建 MCP 服务器
-				mcpServer := imcp.NewMCPServer(cfg)
-
+				// 使用已经注册了外部工具的 MCP 服务器
 				err := mcpServer.StartSSE()
 				if err != nil {
 					errCh <- fmt.Errorf("mcp server error: %w", err)
@@ -201,11 +226,119 @@ var runCmd = &cobra.Command{
 		case err := <-errCh:
 			logx.Error("Server error: %v", err)
 			cancel()
+			// 清理外部 MCP 客户端
+			mcpClientManager.CloseAll()
 			return err
 		}
 
+		// 清理外部 MCP 客户端
+		logx.Info("🧹 Cleaning up external MCP clients...")
+		mcpClientManager.CloseAll()
+
 		time.Sleep(2 * time.Second)
 		logx.Info("👋 Graceful Shutdown Complete.")
+
+		return nil
+	},
+}
+
+// listToolsCmd 列出所有已注册的工具
+var listToolsCmd = &cobra.Command{
+	Use:   "list-tools",
+	Short: "列出所有已注册的 MCP 工具(包括内置和外部工具)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+
+		// 1. 创建 MCP 客户端管理器
+		mcpClientManager := mcpclient.NewManager()
+
+		// 2. 加载外部 MCP 配置
+		if cfg.MCPServersConfig != "" {
+			mcpServersConfig, err := config.LoadMCPServersConfig(cfg.MCPServersConfig)
+			if err != nil {
+				logx.Warn("⚠️  Failed to load MCP servers config: %v", err)
+			} else {
+				if err := mcpClientManager.LoadFromConfig(mcpServersConfig); err != nil {
+					logx.Error("❌ Failed to load MCP clients: %v", err)
+				}
+			}
+		}
+
+		// 3. 创建 MCP 服务器
+		mcpServer := imcp.NewMCPServer(cfg)
+
+		// 4. 注册外部 MCP 的工具
+		if cfg.Server.MCP.AutoRegisterExternalTools {
+			if err := mcpServer.RegisterExternalMCPTools(ctx, mcpClientManager); err != nil {
+				logx.Error("❌ Failed to register external MCP tools: %v", err)
+			}
+		}
+
+		// 5. 列出所有工具
+		result, err := mcpServer.ListTools(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to list tools: %w", err)
+		}
+
+		fmt.Printf("\n📋 Total Tools: %d\n\n", len(result.Tools))
+
+		// 分类统计
+		internalTools := []string{}
+		externalTools := []string{}
+
+		for _, tool := range result.Tools {
+			// 根据工具名前缀判断是否为外部工具
+			// 外部工具通常有前缀（如 jenkins_, github_ 等）
+			if cfg.MCPServersConfig != "" {
+				// 简单判断：如果工具名包含下划线且不是内置工具，可能是外部工具
+				isInternal := false
+				internalToolNames := []string{
+					"search_ecs_by_ip", "search_ecs_by_name", "list_ecs",
+					"search_rds_by_name", "list_rds", "get_rds_info",
+					"list_slb", "get_slb_info", "search_slb_by_ip",
+					"list_oss_buckets", "get_oss_bucket_info",
+					"list_redis", "get_redis_info",
+					"search_eip_by_ip", "list_eip",
+					"search_nat_by_ip", "list_nat",
+					"list_cvm", "search_cvm_by_ip", "search_cvm_by_name",
+				}
+				for _, name := range internalToolNames {
+					if tool.Name == name {
+						isInternal = true
+						break
+					}
+				}
+
+				if isInternal {
+					internalTools = append(internalTools, tool.Name)
+				} else {
+					externalTools = append(externalTools, tool.Name)
+				}
+			} else {
+				internalTools = append(internalTools, tool.Name)
+			}
+		}
+
+		// 打印内置工具
+		if len(internalTools) > 0 {
+			fmt.Printf("🔧 Internal Tools (%d):\n", len(internalTools))
+			for i, name := range internalTools {
+				fmt.Printf("  %d. %s\n", i+1, name)
+			}
+			fmt.Println()
+		}
+
+		// 打印外部工具
+		if len(externalTools) > 0 {
+			fmt.Printf("🌐 External Tools (%d):\n", len(externalTools))
+			for i, name := range externalTools {
+				fmt.Printf("  %d. %s\n", i+1, name)
+			}
+			fmt.Println()
+		}
+
+		// 关闭客户端
+		mcpClientManager.CloseAll()
 
 		return nil
 	},

@@ -1,0 +1,75 @@
+{
+  "mcpServers": {
+    "jenkins": {
+      "isActive": false,
+      "name": "jenkins",
+      "type": "stdio",
+      "description": "Jenkins CI/CD Integration",
+      "baseUrl": "",
+      "command": "python3",
+      "args": [
+        "/path/to/mcp-jenkins/server.py"
+      ],
+      "env": {
+        "JENKINS_URL": "https://jenkins.example.com",
+        "JENKINS_USER": "admin",
+        "JENKINS_API_TOKEN": "your_jenkins_token"
+      },
+      "provider": "lanbaoshen",
+      "providerUrl": "https://github.com/lanbaoshen/mcp-jenkins",
+      "logoUrl": "",
+      "tags": ["cicd", "jenkins"],
+      "longRunning": true,
+      "timeout": 300,
+      "installSource": "manual",
+      "toolPrefix": "jenkins_",
+      "autoRegister": true
+    },
+    "github": {
+      "isActive": false,
+      "name": "github",
+      "type": "stdio",
+      "description": "GitHub Integration",
+      "baseUrl": "",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_your_token"
+      },
+      "provider": "modelcontextprotocol",
+      "providerUrl": "https://github.com/modelcontextprotocol/servers",
+      "logoUrl": "",
+      "tags": ["github", "git"],
+      "longRunning": true,
+      "timeout": 300,
+      "installSource": "npm",
+      "toolPrefix": "github_",
+      "autoRegister": true
+    },
+    "example-streamable": {
+      "isActive": false,
+      "name": "example-streamable",
+      "type": "streamableHttp",
+      "description": "Example Streamable HTTP MCP Server",
+      "baseUrl": "http://localhost:9090",
+      "command": "",
+      "args": [],
+      "env": {},
+      "headers": {
+        "Authorization": "Bearer your_token_here"
+      },
+      "provider": "example",
+      "providerUrl": "https://example.com",
+      "logoUrl": "",
+      "tags": ["example", "streamable"],
+      "longRunning": true,
+      "timeout": 300,
+      "installSource": "manual",
+      "toolPrefix": "example_",
+      "autoRegister": true
+    }
+  }
+}

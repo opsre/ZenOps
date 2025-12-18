@@ -79,6 +79,13 @@ server:
   mcp:
     enabled: true
     port: 8081
+    # 外部 MCP 工具自动注册
+    auto_register_external_tools: true  # 是否自动注册外部 MCP 的工具
+    tool_name_format: "{prefix}{name}"  # 工具命名格式
+
+# 外部 MCP Servers 配置文件路径
+# 支持 JSON 和 YAML 格式,参考 mcp_servers.example.json
+mcp_servers_config: "./mcp_servers.json"
 
 # 认证配置
 auth:

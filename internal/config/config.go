@@ -2,15 +2,16 @@ package config
 
 // Config 应用配置
 type Config struct {
-	Server    ServerConfig    `mapstructure:"server"`
-	Providers ProvidersConfig `mapstructure:"providers"`
-	CICD      CICDConfig      `mapstructure:"cicd"`
-	DingTalk  DingTalkConfig  `mapstructure:"dingtalk"`
-	Feishu    FeishuConfig    `mapstructure:"feishu"`
-	Wecom     WecomConfig     `mapstructure:"wecom"`
-	LLM       LLMConfig       `mapstructure:"llm"`
-	Auth      AuthConfig      `mapstructure:"auth"`
-	Cache     CacheConfig     `mapstructure:"cache"`
+	Server           ServerConfig    `mapstructure:"server"`
+	Providers        ProvidersConfig `mapstructure:"providers"`
+	CICD             CICDConfig      `mapstructure:"cicd"`
+	DingTalk         DingTalkConfig  `mapstructure:"dingtalk"`
+	Feishu           FeishuConfig    `mapstructure:"feishu"`
+	Wecom            WecomConfig     `mapstructure:"wecom"`
+	LLM              LLMConfig       `mapstructure:"llm"`
+	Auth             AuthConfig      `mapstructure:"auth"`
+	Cache            CacheConfig     `mapstructure:"cache"`
+	MCPServersConfig string          `mapstructure:"mcp_servers_config"` // 外部 MCP Servers 配置文件路径
 }
 
 // ProvidersConfig 云服务提供商配置集合
@@ -34,8 +35,10 @@ type HTTPConfig struct {
 
 // MCPConfig MCP 服务配置
 type MCPConfig struct {
-	Enabled bool `mapstructure:"enabled"`
-	Port    int  `mapstructure:"port"`
+	Enabled                   bool   `mapstructure:"enabled"`
+	Port                      int    `mapstructure:"port"`
+	AutoRegisterExternalTools bool   `mapstructure:"auto_register_external_tools"` // 是否自动注册外部 MCP 工具
+	ToolNameFormat            string `mapstructure:"tool_name_format"`              // 工具命名格式,默认 "{prefix}{name}"
 }
 
 // ProviderConfig 云服务提供商配置
