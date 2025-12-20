@@ -25,7 +25,7 @@ ZenOps 是一个面向运维领域的数据智能化查询工具，通过统一�
 - 🔧 **CI/CD 集成**: 支持 Jenkins 等 CI/CD 工具查询
 - 🖥️ **CLI 工具**: 基于 Cobra 的命令行工具
 - 🌐 **HTTP API**: RESTful API 接口
-- 🤖 **MCP 协议**: 支持 Model Context Protocol
+- 🤖 **MCP 协议**: 支持 MCP 配置代理，快速接入外部MCP
 - 💬 **钉钉机器人**: 对话式查询体验(回复消息支持卡片流式输出)
 - 🔌 **插件化架构**: 易于扩展新的云平台和服务
 
