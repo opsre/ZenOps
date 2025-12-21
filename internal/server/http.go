@@ -9,6 +9,7 @@ import (
 	"cnb.cool/zhiqiangwang/pkg/logx"
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/imcp"
+	"github.com/eryajf/zenops/internal/mcpclient"
 	"github.com/eryajf/zenops/internal/model"
 	"github.com/eryajf/zenops/internal/provider"
 	aliyunprovider "github.com/eryajf/zenops/internal/provider/aliyun"
@@ -18,11 +19,12 @@ import (
 
 // HTTPGinServer 基于 Gin 的 HTTP 服务器
 type HTTPGinServer struct {
-	config        *config.Config
-	engine        *gin.Engine
-	server        *http.Server
-	mcpServer     *imcp.MCPServer
-	wecomHandler  *wecom.MessageHandler
+	config           *config.Config
+	engine           *gin.Engine
+	server           *http.Server
+	mcpServer        *imcp.MCPServer
+	mcpClientManager *mcpclient.Manager
+	wecomHandler     *wecom.MessageHandler
 }
 
 // NewHTTPGinServer 创建基于 Gin 的 HTTP 服务器
@@ -65,6 +67,11 @@ func (s *HTTPGinServer) SetMCPServer(mcpServer *imcp.MCPServer) {
 			logx.Info("Wecom message handler initialized")
 		}
 	}
+}
+
+// SetMCPClientManager 设置 MCP Client Manager
+func (s *HTTPGinServer) SetMCPClientManager(manager *mcpclient.Manager) {
+	s.mcpClientManager = manager
 }
 
 // registerMiddlewares 注册中间件
@@ -169,6 +176,22 @@ func (s *HTTPGinServer) registerRoutes() {
 			jenkins.GET("/job/list", s.handleJenkinsJobList)
 			jenkins.GET("/job/get", s.handleJenkinsJobGet)
 			jenkins.GET("/build/list", s.handleJenkinsBuildList)
+		}
+
+		// MCP Server 管理路由
+		mcp := v1.Group("/mcp")
+		{
+			// Server 管理
+			mcp.GET("/servers", s.handleMCPServerList)
+			mcp.GET("/servers/:name", s.handleMCPServerGet)
+			mcp.POST("/servers", s.handleMCPServerAdd)
+			mcp.PUT("/servers/:name", s.handleMCPServerUpdate)
+			mcp.DELETE("/servers/:name", s.handleMCPServerDelete)
+			mcp.PATCH("/servers/:name/toggle", s.handleMCPServerToggle)
+
+			// 工具管理
+			mcp.GET("/servers/:name/tools", s.handleMCPToolList)
+			mcp.POST("/servers/:name/tools/:toolName/test", s.handleMCPToolTest)
 		}
 	}
 }
@@ -566,7 +589,9 @@ func (s *HTTPGinServer) handleAliyunOSSList(c *gin.Context) {
 	}
 
 	// 创建临时客户端
-	var ossClient interface{ ListOSSBuckets(context.Context, int, int, map[string]string) ([]*model.OSSBucket, error) }
+	var ossClient interface {
+		ListOSSBuckets(context.Context, int, int, map[string]string) ([]*model.OSSBucket, error)
+	}
 	for _, region := range aliyunConfig.Regions {
 		c, err := createAliyunClient(aliyunConfig.AK, aliyunConfig.SK, region)
 		if err == nil {
@@ -621,7 +646,9 @@ func (s *HTTPGinServer) handleAliyunOSSGet(c *gin.Context) {
 	}
 
 	// 创建临时客户端
-	var ossClient interface{ GetOSSBucket(context.Context, string) (*model.OSSBucket, error) }
+	var ossClient interface {
+		GetOSSBucket(context.Context, string) (*model.OSSBucket, error)
+	}
 	for _, region := range aliyunConfig.Regions {
 		c, err := createAliyunClient(aliyunConfig.AK, aliyunConfig.SK, region)
 		if err == nil {

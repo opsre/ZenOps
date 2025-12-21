@@ -194,6 +194,9 @@ var runCmd = &cobra.Command{
 				// 设置 MCP Server (用于企业微信等需要 MCP 的功能)
 				httpServer.SetMCPServer(mcpServer)
 
+				// 设置 MCP Client Manager (用于 API 管理)
+				httpServer.SetMCPClientManager(mcpClientManager)
+
 				// 启动 HTTP 服务器(阻塞式)
 				if err := httpServer.Start(); err != nil {
 					errCh <- fmt.Errorf("http server error: %w", err)

@@ -103,6 +103,28 @@ func (c *MCPServersConfig) Validate() error {
 	return nil
 }
 
+// SaveMCPServersConfig 保存 MCP Servers 配置
+func SaveMCPServersConfig(configPath string, config *MCPServersConfig) error {
+	var data []byte
+	var err error
+
+	if isJSON(configPath) {
+		data, err = json.MarshalIndent(config, "", "  ")
+	} else {
+		data, err = yaml.Marshal(config)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
+}
+
 // isJSON 判断文件是否为 JSON 格式
 func isJSON(filename string) bool {
 	return strings.HasSuffix(filename, ".json")
