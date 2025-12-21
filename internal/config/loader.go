@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -9,7 +10,47 @@ import (
 )
 
 // LoadConfig 加载配置文件
+// 优先从数据库加载配置,如果数据库为空则从YAML文件加载并自动迁移
 func LoadConfig(configFile string) (*Config, error) {
+	// 先尝试从数据库加载配置
+	dbConfig, err := loadConfigFromDB()
+	if err == nil && dbConfig != nil {
+		log.Println("Configuration loaded from database")
+		return dbConfig, nil
+	}
+
+	// 如果数据库加载失败,则从YAML加载
+	log.Println("Loading configuration from YAML file...")
+	yamlConfig, err := loadConfigFromYAML(configFile)
+	if err != nil {
+		return nil, err
+	}
+
+	// 尝试将YAML配置迁移到数据库
+	if err := migrateConfigToDB(yamlConfig); err != nil {
+		log.Printf("Warning: failed to migrate config to database: %v", err)
+		// 迁移失败不影响启动,继续使用YAML配置
+	}
+
+	return yamlConfig, nil
+}
+
+// loadConfigFromDB 从数据库加载配置
+func loadConfigFromDB() (*Config, error) {
+	// 这个函数将在启动时从 service 层调用
+	// 这里只是占位,实际加载逻辑在 cmd/root.go 中实现
+	return nil, fmt.Errorf("database config loading is handled externally")
+}
+
+// migrateConfigToDB 迁移配置到数据库
+func migrateConfigToDB(cfg *Config) error {
+	// 这个函数将在启动时从 service 层调用
+	// 这里只是占位,实际迁移逻辑在 cmd/root.go 中实现
+	return fmt.Errorf("config migration is handled externally")
+}
+
+// loadConfigFromYAML 从YAML文件加载配置
+func loadConfigFromYAML(configFile string) (*Config, error) {
 	v := viper.New()
 
 	// 设置配置文件

@@ -129,6 +129,19 @@ func (s *HTTPGinServer) registerRoutes() {
 		// 健康检查
 		v1.GET("/health", s.handleHealth)
 
+		// 用户认证路由 (开发模式模拟接口)
+		userHandler := NewUserHandler()
+		user := v1.Group("/user")
+		{
+			user.GET("/info", userHandler.GetUserInfo)
+			user.GET("/menu/list", userHandler.GetMenuList)
+		}
+		auth := v1.Group("/auth")
+		{
+			auth.POST("/login", userHandler.Login)
+			auth.POST("/logout", userHandler.Logout)
+		}
+
 		// 阿里云路由
 		aliyun := v1.Group("/aliyun")
 		{
@@ -169,6 +182,44 @@ func (s *HTTPGinServer) registerRoutes() {
 			jenkins.GET("/job/list", s.handleJenkinsJobList)
 			jenkins.GET("/job/get", s.handleJenkinsJobGet)
 			jenkins.GET("/build/list", s.handleJenkinsBuildList)
+		}
+
+		// 配置管理路由
+		configHandler := NewConfigHandler()
+		config := v1.Group("/config")
+		{
+			// LLM 配置
+			config.GET("/llm", configHandler.GetLLMConfig)
+			config.PUT("/llm", configHandler.SaveLLMConfig)
+
+			// 云厂商账号配置
+			config.GET("/providers", configHandler.ListProviderAccounts)
+			config.POST("/providers", configHandler.CreateProviderAccount)
+			config.GET("/providers/:id", configHandler.GetProviderAccount)
+			config.PUT("/providers/:id", configHandler.UpdateProviderAccount)
+			config.DELETE("/providers/:id", configHandler.DeleteProviderAccount)
+
+			// IM 配置
+			config.GET("/im", configHandler.ListIMConfigs)
+			config.GET("/im/:platform", configHandler.GetIMConfig)
+			config.PUT("/im/:platform", configHandler.SaveIMConfig)
+
+			// CICD 配置
+			config.GET("/cicd", configHandler.ListCICDConfigs)
+			config.GET("/cicd/:platform", configHandler.GetCICDConfig)
+			config.PUT("/cicd/:platform", configHandler.SaveCICDConfig)
+
+			// MCP Server 配置
+			config.GET("/mcp", configHandler.ListMCPServers)
+			config.POST("/mcp", configHandler.CreateMCPServer)
+			config.GET("/mcp/:id", configHandler.GetMCPServer)
+			config.PUT("/mcp/:id", configHandler.UpdateMCPServer)
+			config.DELETE("/mcp/:id", configHandler.DeleteMCPServer)
+
+			// 系统配置
+			config.GET("/system", configHandler.ListSystemConfigs)
+			config.GET("/system/:key", configHandler.GetSystemConfig)
+			config.POST("/system", configHandler.SetSystemConfig)
 		}
 	}
 }

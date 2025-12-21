@@ -1,0 +1,182 @@
+// 这是一个示例文件,展示如何在 cmd/root.go 中集成数据库配置管理
+// 请将以下代码整合到你的 cmd/root.go 文件中
+
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/eryajf/zenops/internal/config"
+	"github.com/eryajf/zenops/internal/database"
+	"github.com/eryajf/zenops/internal/imcp"
+	"github.com/eryajf/zenops/internal/mcpclient"
+	"github.com/eryajf/zenops/internal/server"
+	"github.com/eryajf/zenops/internal/service"
+	"github.com/spf13/cobra"
+)
+
+var (
+	configFile string
+	httpOnly   bool
+	mcpOnly    bool
+)
+
+var rootCmd = &cobra.Command{
+	Use:   "zenops",
+	Short: "ZenOps - 运维智能化工具",
+	Long:  `ZenOps 是一个面向运维领域的数据智能化查询工具`,
+}
+
+var runCmd = &cobra.Command{
+	Use:   "run",
+	Short: "启动 ZenOps 服务",
+	RunE:  runServer,
+}
+
+func init() {
+	// 全局 flags
+	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "配置文件路径 (默认: ./config.yaml)")
+
+	// run 命令 flags
+	runCmd.Flags().BoolVar(&httpOnly, "http-only", false, "仅启动 HTTP 服务")
+	runCmd.Flags().BoolVar(&mcpOnly, "mcp-only", false, "仅启动 MCP 服务")
+
+	rootCmd.AddCommand(runCmd)
+}
+
+func runServer(cmd *cobra.Command, args []string) error {
+	// ========== 1. 初始化数据库 ==========
+	log.Println("Initializing database...")
+	db := database.GetDB()
+	if db == nil {
+		return fmt.Errorf("failed to initialize database")
+	}
+	defer database.Close()
+
+	// ========== 2. 设置配置加载器 ==========
+	configService := service.NewConfigService()
+
+	// 设置数据库配置加载函数
+	config.SetDBLoader(func() (*config.Config, error) {
+		log.Println("Attempting to load configuration from database...")
+		return configService.LoadConfigFromDB()
+	})
+
+	// 设置配置迁移函数
+	config.SetDBMigrator(func(cfg *config.Config) error {
+		log.Println("Migrating configuration to database...")
+
+		// 迁移 YAML 配置到数据库
+		if err := configService.MigrateFromYAML(cfg); err != nil {
+			return fmt.Errorf("failed to migrate YAML config: %w", err)
+		}
+
+		// 迁移 MCP Servers 配置
+		if cfg.MCPServersConfig != "" {
+			log.Printf("Migrating MCP servers from: %s", cfg.MCPServersConfig)
+			if err := configService.MigrateMCPServersFromJSON(cfg.MCPServersConfig); err != nil {
+				log.Printf("Warning: failed to migrate MCP servers: %v", err)
+				// 不影响启动,继续执行
+			}
+		}
+
+		return nil
+	})
+
+	// ========== 3. 加载配置(优先从数据库) ==========
+	cfg, err := config.LoadConfigWithDB(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// 设置全局配置
+	config.SetGlobalConfig(cfg)
+
+	// ========== 4. 创建 MCP 客户端管理器 ==========
+	mcpManager := mcpclient.NewManager()
+
+	// 从数据库加载 MCP Servers 配置
+	mcpServersConfig, err := configService.LoadMCPServersFromDB()
+	if err != nil {
+		log.Printf("Warning: failed to load MCP servers from database: %v", err)
+	} else if len(mcpServersConfig) > 0 {
+		log.Printf("Loaded %d active MCP servers from database", len(mcpServersConfig))
+		// 注意: 这里需要调用 MCP 客户端管理器的方法来加载这些配置
+		// 具体实现取决于你的 mcpclient.Manager 结构
+	}
+
+	// ========== 5. 创建 MCP Server ==========
+	mcpServer := imcp.NewMCPServer(cfg, mcpManager)
+
+	// ========== 6. 启动服务 ==========
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 信号处理
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	errChan := make(chan error, 3)
+
+	// 启动 HTTP 服务
+	if cfg.Server.HTTP.Enabled && !mcpOnly {
+		httpServer := server.NewHTTPGinServer(cfg)
+		httpServer.SetMCPServer(mcpServer)
+
+		go func() {
+			if err := httpServer.Start(); err != nil {
+				errChan <- fmt.Errorf("HTTP server error: %w", err)
+			}
+		}()
+
+		// 优雅关闭
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			httpServer.Stop(shutdownCtx)
+		}()
+	}
+
+	// 启动 MCP 服务
+	if cfg.Server.MCP.Enabled && !httpOnly {
+		go func() {
+			if err := mcpServer.StartSSE(fmt.Sprintf(":%d", cfg.Server.MCP.Port)); err != nil {
+				errChan <- fmt.Errorf("MCP server error: %w", err)
+			}
+		}()
+	}
+
+	// 启动钉钉 Stream 服务
+	if cfg.DingTalk.Enabled && !httpOnly && !mcpOnly {
+		// 启动钉钉服务的代码...
+	}
+
+	// 启动飞书 Stream 服务
+	if cfg.Feishu.Enabled && !httpOnly && !mcpOnly {
+		// 启动飞书服务的代码...
+	}
+
+	// ========== 7. 等待信号或错误 ==========
+	select {
+	case sig := <-sigChan:
+		log.Printf("Received signal: %v, shutting down...", sig)
+		cancel()
+	case err := <-errChan:
+		log.Printf("Service error: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+func Execute() {
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
