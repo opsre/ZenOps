@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router';
 import MCPList from '@/views/mcp/MCPList.vue';
-import RequestLogs from '@/views/database/RequestLogs.vue';
-import ConfigSnapshots from '@/views/database/ConfigSnapshots.vue';
+import ConfigManagement from '@/views/config/ConfigManagement.vue';
 
 const routes: RouteRecordRaw[] = [
   {
@@ -17,19 +16,11 @@ const routes: RouteRecordRaw[] = [
     },
   },
   {
-    path: '/database/logs',
-    name: 'RequestLogs',
-    component: RequestLogs,
+    path: '/config',
+    name: 'ConfigManagement',
+    component: ConfigManagement,
     meta: {
-      title: '请求日志',
-    },
-  },
-  {
-    path: '/database/config',
-    name: 'ConfigSnapshots',
-    component: ConfigSnapshots,
-    meta: {
-      title: '配置快照',
+      title: '配置管理',
     },
   },
 ];

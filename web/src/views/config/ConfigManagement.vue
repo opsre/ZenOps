@@ -2,7 +2,7 @@
   <div class="config-management-page">
     <t-card title="配置管理" :bordered="false">
       <template #subtitle>
-        <span class="subtitle-text">管理各类系统配置的快照和历史版本</span>
+        <span class="subtitle-text">管理各类系统配置</span>
       </template>
 
       <t-tabs v-model="activeTab" @change="handleTabChange">

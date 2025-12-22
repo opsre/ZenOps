@@ -218,79 +218,107 @@
     <t-dialog
       v-model:visible="dialogVisible"
       :header="isEdit ? '编辑 MCP Server' : '添加 MCP Server'"
-      width="640px"
+      width="700px"
       @confirm="handleDialogConfirm"
     >
       <t-form ref="formRef" :data="formData" :rules="rules" label-align="top">
-        <t-form-item label="名称" name="name">
-          <t-input v-model="formData.name" :disabled="isEdit" placeholder="请输入 MCP Server 名称" />
-        </t-form-item>
-        <t-form-item label="类型" name="type">
-          <t-select v-model="formData.type" placeholder="请选择连接类型">
-            <t-option label="Stdio (本地命令)" value="stdio" />
-            <t-option label="SSE (Server-Sent Events)" value="sse" />
-            <t-option label="Streamable HTTP" value="streamableHttp" />
-          </t-select>
-        </t-form-item>
-        <t-form-item label="描述" name="description">
-          <t-textarea v-model="formData.description" placeholder="请输入描述" />
-        </t-form-item>
+        <!-- 通用配置 -->
+        <div class="form-section">
+          <h4 class="section-title">通用</h4>
+          <t-form-item label="名称" name="name">
+            <t-input v-model="formData.name" :disabled="isEdit" placeholder="请输入 MCP Server 名称" />
+          </t-form-item>
 
-        <template v-if="formData.type === 'stdio'">
-          <t-form-item label="命令" name="command">
-            <t-input v-model="formData.command" placeholder="例如: python3, npx" />
-          </t-form-item>
-          <t-form-item label="参数" name="args">
-            <t-tag-input v-model="formData.args" placeholder="输入参数后按回车" />
-          </t-form-item>
-          <t-form-item label="环境变量" name="env">
+          <t-form-item label="描述" name="description">
             <t-textarea
-              :value="envString"
-              @change="handleEnvChange"
-              placeholder="KEY=VALUE (每行一个)"
-              :autosize="{ minRows: 3, maxRows: 5 }"
+              v-model="formData.description"
+              placeholder="请输入描述"
+              :autosize="{ minRows: 2, maxRows: 4 }"
             />
           </t-form-item>
-        </template>
 
-        <template v-if="formData.type && ['sse', 'streamableHttp'].includes(formData.type)">
-          <t-form-item label="Base URL" name="baseUrl">
-            <t-input v-model="formData.baseUrl" placeholder="http://localhost:8080" />
+          <t-form-item label="类型" name="type">
+            <t-select v-model="formData.type" placeholder="请选择连接类型">
+              <t-option label="Stdio (本地命令)" value="stdio" />
+              <t-option label="SSE (Server-Sent Events)" value="sse" />
+              <t-option label="Streamable HTTP" value="streamableHttp" />
+            </t-select>
           </t-form-item>
-        </template>
 
-        <t-divider />
+          <template v-if="formData.type === 'stdio'">
+            <t-form-item label="命令" name="command">
+              <t-input v-model="formData.command" placeholder="例如: python3, npx, uvx" />
+            </t-form-item>
+            <t-form-item label="参数" name="args">
+              <t-tag-input v-model="formData.args" placeholder="输入参数后按回车，例如: -m server" />
+            </t-form-item>
+            <t-form-item label="环境变量" name="env">
+              <t-textarea
+                :value="envString"
+                @change="handleEnvChange"
+                placeholder="KEY=VALUE (每行一个)"
+                :autosize="{ minRows: 3, maxRows: 5 }"
+              />
+            </t-form-item>
+          </template>
 
-        <t-form-item label="提供商信息">
-          <t-input-group>
-            <t-input v-model="formData.provider" placeholder="提供商名称" style="width: 50%" />
-            <t-input v-model="formData.providerUrl" placeholder="提供商 URL" style="width: 50%" />
-          </t-input-group>
-        </t-form-item>
+          <template v-if="formData.type && ['sse', 'streamableHttp'].includes(formData.type)">
+            <t-form-item label="Base URL" name="baseUrl">
+              <t-input v-model="formData.baseUrl" placeholder="http://localhost:8080" />
+            </t-form-item>
+          </template>
 
-        <t-form-item label="超时时间(秒)" name="timeout">
-          <t-input-number v-model="formData.timeout" :min="1" :max="3600" placeholder="300" style="width: 100%" />
-        </t-form-item>
+          <t-form-item label="长期运行进程">
+            <div style="display: flex; align-items: center; gap: 12px">
+              <t-switch v-model="formData.longRunning" />
+              <span style="font-size: 12px; color: #666">启用后,服务会保持长连接状态</span>
+            </div>
+          </t-form-item>
 
-        <t-form-item label="工具前缀" name="toolPrefix">
-          <t-input
-            v-model="formData.toolPrefix"
-            placeholder="留空自动生成"
-            :tips="`工具将以 '${formData.toolPrefix || formData.name + '_'}' 为前缀注册到系统`"
-          />
-        </t-form-item>
+          <t-form-item label="超时时间(秒)" name="timeout">
+            <t-input-number v-model="formData.timeout" :min="1" :max="3600" placeholder="300" style="width: 100%" />
+          </t-form-item>
+        </div>
 
-        <t-form-item label="标签" name="tags">
-          <t-tag-input v-model="formData.tags" placeholder="输入标签后按回车，如: cicd, git" />
-        </t-form-item>
+        <!-- 高级设置 -->
+        <div class="form-section">
+          <div class="section-header" @click="advancedVisible = !advancedVisible">
+            <h4 class="section-title">高级设置</h4>
+            <t-icon :name="advancedVisible ? 'chevron-up' : 'chevron-down'" />
+          </div>
+          <div v-show="advancedVisible" class="section-content">
+            <t-form-item label="提供商名称">
+              <t-input v-model="formData.provider" placeholder="例如: Anthropic, OpenAI" />
+            </t-form-item>
 
-        <t-form-item label="高级选项">
-          <t-space direction="vertical" style="width: 100%">
-            <t-checkbox v-model="formData.longRunning">长期运行进程</t-checkbox>
-            <t-checkbox v-model="formData.autoRegister">自动注册工具到 ZenOps MCP</t-checkbox>
-            <t-checkbox v-model="formData.isActive">创建后立即启用</t-checkbox>
-          </t-space>
-        </t-form-item>
+            <t-form-item label="提供商 URL">
+              <t-input v-model="formData.providerUrl" placeholder="https://example.com" />
+            </t-form-item>
+
+            <t-form-item label="Logo URL">
+              <t-input v-model="formData.logoUrl" placeholder="https://example.com/logo.png" />
+            </t-form-item>
+
+            <t-form-item label="标签" name="tags">
+              <t-tag-input v-model="formData.tags" placeholder="输入标签后按回车，如: cicd, git, database" />
+            </t-form-item>
+
+            <t-form-item label="工具前缀" name="toolPrefix">
+              <t-input
+                v-model="formData.toolPrefix"
+                placeholder="留空自动生成"
+                :tips="`工具将以 '${formData.toolPrefix || formData.name + '_'}' 为前缀注册到系统`"
+              />
+            </t-form-item>
+
+            <t-form-item label="其他选项">
+              <t-space direction="vertical" style="width: 100%">
+                <t-checkbox v-model="formData.autoRegister">自动注册工具到 ZenOps MCP</t-checkbox>
+                <t-checkbox v-model="formData.isActive">创建后立即启用</t-checkbox>
+              </t-space>
+            </t-form-item>
+          </div>
+        </div>
       </t-form>
     </t-dialog>
 
@@ -388,6 +416,7 @@ const { servers, loading, tools } = storeToRefs(store);
 const toolsLoading = ref(false);
 const dialogVisible = ref(false);
 const isEdit = ref(false);
+const advancedVisible = ref(false);
 const formRef = ref();
 const formData = ref<Partial<MCPServerConfig>>({
   name: '',
@@ -402,6 +431,7 @@ const formData = ref<Partial<MCPServerConfig>>({
   timeout: 300,
   toolPrefix: '',
   autoRegister: true,
+  logoUrl: '',
 });
 const envString = ref('');
 
@@ -1069,6 +1099,60 @@ onMounted(() => {
   .list-actions {
     width: 100%;
     justify-content: flex-start;
+  }
+}
+
+/* Form sections styling */
+.form-section {
+  margin-bottom: 24px;
+}
+
+.form-section:last-child {
+  margin-bottom: 0;
+}
+
+.section-title {
+  margin: 0 0 16px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease;
+  padding: 8px 0;
+  margin-bottom: 12px;
+}
+
+.section-header:hover {
+  opacity: 0.8;
+}
+
+.section-header .section-title {
+  border-bottom: none;
+  margin: 0;
+  padding: 0;
+}
+
+.section-content {
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 </style>

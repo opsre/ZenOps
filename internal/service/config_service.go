@@ -279,3 +279,21 @@ func (s *ConfigService) ListSystemConfigs() ([]model.SystemConfig, error) {
 	err := s.db.Order("config_key").Find(&configs).Error
 	return configs, err
 }
+
+// GetIMConfigByID 根据ID获取IM配置
+func (s *ConfigService) GetIMConfigByID(id uint) (*model.IMConfig, error) {
+	var config model.IMConfig
+	err := s.db.First(&config, id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &config, nil
+}
+
+// DeleteIMConfig 删除IM配置
+func (s *ConfigService) DeleteIMConfig(id uint) error {
+	return s.db.Delete(&model.IMConfig{}, id).Error
+}

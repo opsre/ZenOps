@@ -184,37 +184,54 @@ func (s *HTTPGinServer) registerRoutes() {
 			jenkins.GET("/build/list", s.handleJenkinsBuildList)
 		}
 
-		// 配置管理路由
+		// MCP Server 管理路由 (独立路由组)
 		configHandler := NewConfigHandler()
+		mcp := v1.Group("/mcp")
+		{
+			mcp.GET("/servers", configHandler.ListMCPServers)
+			mcp.POST("/servers", configHandler.CreateMCPServer)
+			mcp.GET("/servers/:name", configHandler.GetMCPServerByName)
+			mcp.PUT("/servers/:name", configHandler.UpdateMCPServerByName)
+			mcp.DELETE("/servers/:name", configHandler.DeleteMCPServerByName)
+			mcp.PATCH("/servers/:name/toggle", configHandler.ToggleMCPServer)
+			mcp.GET("/servers/:name/tools", configHandler.GetMCPTools)
+			mcp.POST("/servers/:name/tools/:toolName/test", configHandler.TestMCPTool)
+		}
+
+		// 配置管理路由
 		config := v1.Group("/config")
 		{
 			// LLM 配置
 			config.GET("/llm", configHandler.GetLLMConfig)
 			config.PUT("/llm", configHandler.SaveLLMConfig)
+			config.POST("/llm", configHandler.SaveLLMConfig) // 兼容 POST
 
-			// 云厂商账号配置
-			config.GET("/providers", configHandler.ListProviderAccounts)
-			config.POST("/providers", configHandler.CreateProviderAccount)
-			config.GET("/providers/:id", configHandler.GetProviderAccount)
-			config.PUT("/providers/:id", configHandler.UpdateProviderAccount)
-			config.DELETE("/providers/:id", configHandler.DeleteProviderAccount)
+			// 云厂商账号配置 (改为单数 provider)
+			config.GET("/provider", configHandler.ListProviderAccounts)
+			config.POST("/provider", configHandler.CreateProviderAccount)
+			config.GET("/provider/:id", configHandler.GetProviderAccount)
+			config.PUT("/provider/:id", configHandler.UpdateProviderAccount)
+			config.DELETE("/provider/:id", configHandler.DeleteProviderAccount)
 
-			// IM 配置
-			config.GET("/im", configHandler.ListIMConfigs)
-			config.GET("/im/:platform", configHandler.GetIMConfig)
-			config.PUT("/im/:platform", configHandler.SaveIMConfig)
+			// IM 配置 (添加 integration 别名)
+			config.GET("/integration", configHandler.ListIntegrationConfigs)
+			config.POST("/integration", configHandler.CreateIntegrationConfig)
+			config.GET("/integration/:id", configHandler.GetIntegrationConfig)
+			config.PUT("/integration/:id", configHandler.UpdateIntegrationConfig)
+			config.DELETE("/integration/:id", configHandler.DeleteIntegrationConfig)
 
 			// CICD 配置
 			config.GET("/cicd", configHandler.ListCICDConfigs)
 			config.GET("/cicd/:platform", configHandler.GetCICDConfig)
 			config.PUT("/cicd/:platform", configHandler.SaveCICDConfig)
 
-			// MCP Server 配置
-			config.GET("/mcp", configHandler.ListMCPServers)
-			config.POST("/mcp", configHandler.CreateMCPServer)
-			config.GET("/mcp/:id", configHandler.GetMCPServer)
-			config.PUT("/mcp/:id", configHandler.UpdateMCPServer)
-			config.DELETE("/mcp/:id", configHandler.DeleteMCPServer)
+			// Jenkins 配置便捷路由
+			config.GET("/jenkins", configHandler.GetJenkinsConfig)
+			config.POST("/jenkins", configHandler.SaveJenkinsConfig)
+
+			// 服务器配置
+			config.GET("/server", configHandler.GetServerConfig)
+			config.POST("/server", configHandler.SaveServerConfig)
 
 			// 系统配置
 			config.GET("/system", configHandler.ListSystemConfigs)

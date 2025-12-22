@@ -11,8 +11,7 @@
         </div>
         <div class="nav-links">
           <router-link to="/mcp" class="link" :class="{ active: $route.path === '/mcp' }">MCP 管理</router-link>
-          <router-link to="/database/logs" class="link" :class="{ active: $route.path.startsWith('/database/logs') }">请求日志</router-link>
-          <router-link to="/database/config" class="link" :class="{ active: $route.path.startsWith('/database/config') }">配置快照</router-link>
+          <router-link to="/config" class="link" :class="{ active: $route.path.startsWith('/config') }">配置管理</router-link>
           <router-link to="/about" class="link disabled">关于</router-link>
         </div>
         <div class="nav-actions">

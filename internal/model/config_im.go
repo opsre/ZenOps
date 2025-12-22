@@ -22,7 +22,20 @@ func (jm *JSONMap) Scan(value interface{}) error {
 		return fmt.Errorf("failed to unmarshal JSONMap value: %v", value)
 	}
 
-	return json.Unmarshal(bytes, jm)
+	// 初始化 map
+	*jm = make(map[string]interface{})
+
+	// 如果是空字符串或空JSON对象，直接返回
+	if len(bytes) == 0 || string(bytes) == "{}" || string(bytes) == "null" {
+		return nil
+	}
+
+	// 尝试反序列化
+	if err := json.Unmarshal(bytes, jm); err != nil {
+		return fmt.Errorf("failed to unmarshal JSONMap: %w", err)
+	}
+
+	return nil
 }
 
 // Value 实现 driver.Valuer 接口

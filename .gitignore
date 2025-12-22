@@ -42,3 +42,4 @@ tmp/
 temp/
 node_modules/
 dist/
+data/

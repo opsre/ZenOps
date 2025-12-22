@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -360,23 +361,17 @@ func (h *ConfigHandler) ListMCPServers(c *gin.Context) {
 	c.JSON(http.StatusOK, Response{
 		Code:    200,
 		Message: "success",
-		Data:    servers,
+		Data: gin.H{
+			"servers": servers,
+		},
 	})
 }
 
-// GetMCPServer 获取 MCP 服务器详情
-func (h *ConfigHandler) GetMCPServer(c *gin.Context) {
-	idStr := c.Param("id")
-	id, err := strconv.ParseUint(idStr, 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, Response{
-			Code:    400,
-			Message: "invalid id",
-		})
-		return
-	}
+// GetMCPServerByName 根据名称获取 MCP 服务器详情
+func (h *ConfigHandler) GetMCPServerByName(c *gin.Context) {
+	name := c.Param("name")
 
-	server, err := h.configService.GetMCPServer(uint(id))
+	server, err := h.configService.GetMCPServerByName(name)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, Response{
 			Code:    500,
@@ -385,10 +380,20 @@ func (h *ConfigHandler) GetMCPServer(c *gin.Context) {
 		return
 	}
 
+	if server == nil {
+		c.JSON(http.StatusNotFound, Response{
+			Code:    404,
+			Message: "MCP server not found",
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, Response{
 		Code:    200,
 		Message: "success",
-		Data:    server,
+		Data: gin.H{
+			"server": server,
+		},
 	})
 }
 
@@ -414,18 +419,30 @@ func (h *ConfigHandler) CreateMCPServer(c *gin.Context) {
 	c.JSON(http.StatusOK, Response{
 		Code:    200,
 		Message: "MCP server created successfully",
-		Data:    server,
+		Data: gin.H{
+			"server": server,
+		},
 	})
 }
 
-// UpdateMCPServer 更新 MCP 服务器
-func (h *ConfigHandler) UpdateMCPServer(c *gin.Context) {
-	idStr := c.Param("id")
-	id, err := strconv.ParseUint(idStr, 10, 32)
+// UpdateMCPServerByName 根据名称更新 MCP 服务器
+func (h *ConfigHandler) UpdateMCPServerByName(c *gin.Context) {
+	name := c.Param("name")
+
+	// 先查找现有服务器
+	existing, err := h.configService.GetMCPServerByName(name)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, Response{
-			Code:    400,
-			Message: "invalid id",
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if existing == nil {
+		c.JSON(http.StatusNotFound, Response{
+			Code:    404,
+			Message: "MCP server not found",
 		})
 		return
 	}
@@ -439,7 +456,10 @@ func (h *ConfigHandler) UpdateMCPServer(c *gin.Context) {
 		return
 	}
 
-	server.ID = uint(id)
+	// 保留原有ID和名称
+	server.ID = existing.ID
+	server.Name = name
+
 	if err := h.configService.UpdateMCPServer(&server); err != nil {
 		c.JSON(http.StatusInternalServerError, Response{
 			Code:    500,
@@ -451,23 +471,34 @@ func (h *ConfigHandler) UpdateMCPServer(c *gin.Context) {
 	c.JSON(http.StatusOK, Response{
 		Code:    200,
 		Message: "MCP server updated successfully",
-		Data:    server,
+		Data: gin.H{
+			"server": server,
+		},
 	})
 }
 
-// DeleteMCPServer 删除 MCP 服务器
-func (h *ConfigHandler) DeleteMCPServer(c *gin.Context) {
-	idStr := c.Param("id")
-	id, err := strconv.ParseUint(idStr, 10, 32)
+// DeleteMCPServerByName 根据名称删除 MCP 服务器
+func (h *ConfigHandler) DeleteMCPServerByName(c *gin.Context) {
+	name := c.Param("name")
+
+	server, err := h.configService.GetMCPServerByName(name)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, Response{
-			Code:    400,
-			Message: "invalid id",
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
 		})
 		return
 	}
 
-	if err := h.configService.DeleteMCPServer(uint(id)); err != nil {
+	if server == nil {
+		c.JSON(http.StatusNotFound, Response{
+			Code:    404,
+			Message: "MCP server not found",
+		})
+		return
+	}
+
+	if err := h.configService.DeleteMCPServer(server.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, Response{
 			Code:    500,
 			Message: err.Error(),
@@ -478,6 +509,389 @@ func (h *ConfigHandler) DeleteMCPServer(c *gin.Context) {
 	c.JSON(http.StatusOK, Response{
 		Code:    200,
 		Message: "MCP server deleted successfully",
+	})
+}
+
+// ToggleMCPServer 切换 MCP 服务器启用状态
+func (h *ConfigHandler) ToggleMCPServer(c *gin.Context) {
+	name := c.Param("name")
+
+	var req struct {
+		IsActive bool `json:"isActive"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	server, err := h.configService.GetMCPServerByName(name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if server == nil {
+		c.JSON(http.StatusNotFound, Response{
+			Code:    404,
+			Message: "MCP server not found",
+		})
+		return
+	}
+
+	server.IsActive = req.IsActive
+	if err := h.configService.UpdateMCPServer(server); err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "MCP server status updated successfully",
+		Data: gin.H{
+			"server": server,
+		},
+	})
+}
+
+// GetMCPTools 获取 MCP 服务器的工具列表
+func (h *ConfigHandler) GetMCPTools(c *gin.Context) {
+	_ = c.Param("name") // serverName for future use
+
+	// TODO: 实现获取MCP服务器工具列表的逻辑
+	// 这需要与MCP服务器实际通信,暂时返回空列表
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "success",
+		Data: gin.H{
+			"tools": []interface{}{},
+		},
+	})
+}
+
+// TestMCPTool 测试调用 MCP 工具
+func (h *ConfigHandler) TestMCPTool(c *gin.Context) {
+	serverName := c.Param("name")
+	toolName := c.Param("toolName")
+
+	var args interface{}
+	if err := c.ShouldBindJSON(&args); err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// TODO: 实现测试调用MCP工具的逻辑
+	// 这需要与MCP服务器实际通信
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "success",
+		Data: gin.H{
+			"result": gin.H{
+				"server_name": serverName,
+				"tool_name":   toolName,
+				"args":        args,
+				"content": []gin.H{
+					{
+						"type": "text",
+						"text": "Tool test not implemented yet",
+					},
+				},
+			},
+		},
+	})
+}
+
+// ========== Integration (IM) 配置 - 前端兼容接口 ==========
+
+// ListIntegrationConfigs 列出所有集成应用配置
+func (h *ConfigHandler) ListIntegrationConfigs(c *gin.Context) {
+	configs, err := h.configService.ListIMConfigs()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "success",
+		Data:    configs,
+	})
+}
+
+// GetIntegrationConfig 获取指定集成应用配置
+func (h *ConfigHandler) GetIntegrationConfig(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: "invalid id",
+		})
+		return
+	}
+
+	config, err := h.configService.GetIMConfigByID(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if config == nil {
+		c.JSON(http.StatusNotFound, Response{
+			Code:    404,
+			Message: "Integration config not found",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "success",
+		Data:    config,
+	})
+}
+
+// CreateIntegrationConfig 创建集成应用配置
+func (h *ConfigHandler) CreateIntegrationConfig(c *gin.Context) {
+	var config model.IMConfig
+	if err := c.ShouldBindJSON(&config); err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if err := h.configService.SaveIMConfig(&config); err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "Integration configuration created successfully",
+		Data:    config,
+	})
+}
+
+// UpdateIntegrationConfig 更新集成应用配置
+func (h *ConfigHandler) UpdateIntegrationConfig(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: "invalid id",
+		})
+		return
+	}
+
+	var config model.IMConfig
+	if err := c.ShouldBindJSON(&config); err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	config.ID = uint(id)
+	if err := h.configService.SaveIMConfig(&config); err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "Integration configuration updated successfully",
+		Data:    config,
+	})
+}
+
+// DeleteIntegrationConfig 删除集成应用配置
+func (h *ConfigHandler) DeleteIntegrationConfig(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: "invalid id",
+		})
+		return
+	}
+
+	if err := h.configService.DeleteIMConfig(uint(id)); err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "Integration configuration deleted successfully",
+	})
+}
+
+// ========== Jenkins 配置便捷接口 ==========
+
+// GetJenkinsConfig 获取 Jenkins 配置
+func (h *ConfigHandler) GetJenkinsConfig(c *gin.Context) {
+	config, err := h.configService.GetCICDConfig("jenkins")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "success",
+		Data:    config,
+	})
+}
+
+// SaveJenkinsConfig 保存 Jenkins 配置
+func (h *ConfigHandler) SaveJenkinsConfig(c *gin.Context) {
+	var config model.CICDConfig
+	if err := c.ShouldBindJSON(&config); err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	config.Platform = "jenkins"
+	if err := h.configService.SaveCICDConfig(&config); err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "Jenkins configuration saved successfully",
+		Data:    config,
+	})
+}
+
+// ========== 服务器配置 ==========
+
+// GetServerConfig 获取服务器配置
+func (h *ConfigHandler) GetServerConfig(c *gin.Context) {
+	// 从系统配置中读取服务器相关配置
+	keys := []string{
+		model.ConfigKeyServerHTTPEnabled,
+		model.ConfigKeyServerHTTPPort,
+		model.ConfigKeyServerMCPEnabled,
+		model.ConfigKeyServerMCPPort,
+		model.ConfigKeyServerMCPAutoRegisterExternalTools,
+		model.ConfigKeyServerMCPToolNameFormat,
+	}
+
+	serverConfig := make(map[string]string)
+	for _, key := range keys {
+		config, err := h.configService.GetSystemConfig(key)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, Response{
+				Code:    500,
+				Message: err.Error(),
+			})
+			return
+		}
+		if config != nil {
+			serverConfig[key] = config.ConfigValue
+		}
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "success",
+		Data:    serverConfig,
+	})
+}
+
+// SaveServerConfig 保存服务器配置
+func (h *ConfigHandler) SaveServerConfig(c *gin.Context) {
+	var configMap map[string]interface{}
+	if err := c.ShouldBindJSON(&configMap); err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// 保存每个配置项
+	configKeys := map[string]string{
+		"http_enabled":                      model.ConfigKeyServerHTTPEnabled,
+		"http_port":                         model.ConfigKeyServerHTTPPort,
+		"mcp_enabled":                       model.ConfigKeyServerMCPEnabled,
+		"mcp_port":                          model.ConfigKeyServerMCPPort,
+		"auto_register_external_tools":      model.ConfigKeyServerMCPAutoRegisterExternalTools,
+		"tool_name_format":                  model.ConfigKeyServerMCPToolNameFormat,
+	}
+
+	for jsonKey, dbKey := range configKeys {
+		if value, ok := configMap[jsonKey]; ok {
+			var strValue string
+			switch v := value.(type) {
+			case string:
+				strValue = v
+			case bool:
+				if v {
+					strValue = "true"
+				} else {
+					strValue = "false"
+				}
+			case float64:
+				strValue = strconv.FormatFloat(v, 'f', 0, 64)
+			default:
+				strValue = fmt.Sprintf("%v", v)
+			}
+
+			if err := h.configService.SetSystemConfig(dbKey, strValue, ""); err != nil {
+				c.JSON(http.StatusInternalServerError, Response{
+					Code:    500,
+					Message: err.Error(),
+				})
+				return
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "Server configuration saved successfully",
 	})
 }
 
