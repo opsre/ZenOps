@@ -1,0 +1,29 @@
+{
+  "name": "web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "prepare": "node -e \"if(require('fs').existsSync('.git')){process.exit(1)}\" || is-ci || husky install"
+  },
+  "dependencies": {
+    "axios": "^1.13.2",
+    "less": "^4.5.1",
+    "pinia": "^3.0.4",
+    "tdesign-icons-vue-next": "latest",
+    "tdesign-vue-next": "latest",
+    "vite-svg-loader": "^5.1.0",
+    "vue": "^3.4.21",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "typescript": "^5.4.4",
+    "vite": "^5.2.8",
+    "vue-tsc": "^2.0.10"
+  },
+  "description": "ZenOps Web"
+}
