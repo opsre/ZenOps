@@ -13,6 +13,7 @@ zenops
 # Output of the go coverage tool
 *.out
 coverage.html
+zenops.db
 
 # Go workspace file
 go.work

@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
@@ -13,6 +15,7 @@ import (
 	"github.com/eryajf/zenops/internal/provider"
 	aliyunprovider "github.com/eryajf/zenops/internal/provider/aliyun"
 	"github.com/eryajf/zenops/internal/wecom"
+	"github.com/eryajf/zenops/web"
 	"github.com/gin-gonic/gin"
 )
 
@@ -216,6 +219,14 @@ func (s *HTTPGinServer) registerRoutes() {
 			logs.GET("/mcp", logHandler.GetMCPLogs)
 		}
 
+		// AI 对话路由
+		chatHandler := NewChatHandler(s.config)
+		chat := v1.Group("/chat")
+		{
+			chat.POST("/completions", chatHandler.Completions)
+			chat.GET("/models", chatHandler.GetModels)
+		}
+
 		// 对话历史路由
 		historyHandler := NewHistoryHandler()
 		history := v1.Group("/history")
@@ -267,6 +278,51 @@ func (s *HTTPGinServer) registerRoutes() {
 			config.POST("/system", configHandler.SetSystemConfig)
 		}
 	}
+
+	// 前端静态文件服务 (SPA 模式)
+	s.registerStaticFiles()
+}
+
+// registerStaticFiles 注册前端静态文件服务
+func (s *HTTPGinServer) registerStaticFiles() {
+	// 获取嵌入的前端文件系统
+	distFS := web.GetFS()
+	subFS, err := fs.Sub(distFS, "dist")
+	if err != nil {
+		logx.Error("Failed to get embedded frontend files: %v", err)
+		return
+	}
+
+	// 静态文件服务器
+	fileServer := http.FileServer(http.FS(subFS))
+
+	// 处理所有非 API 请求
+	s.engine.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
+
+		// 如果是 API 请求，返回 404
+		if strings.HasPrefix(path, "/api/") {
+			c.JSON(http.StatusNotFound, Response{
+				Code:    404,
+				Message: "API not found",
+			})
+			return
+		}
+
+		// 尝试直接提供静态文件
+		// 检查文件是否存在
+		f, err := subFS.Open(strings.TrimPrefix(path, "/"))
+		if err == nil {
+			f.Close()
+			// 文件存在，直接提供
+			fileServer.ServeHTTP(c.Writer, c.Request)
+			return
+		}
+
+		// 文件不存在，返回 index.html (SPA 模式)
+		c.Request.URL.Path = "/"
+		fileServer.ServeHTTP(c.Writer, c.Request)
+	})
 }
 
 // Start 启动 HTTP 服务器
