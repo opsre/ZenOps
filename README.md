@@ -11,7 +11,7 @@
 
 <p> 🧘 通过钉钉、飞书、企微智能机器人用自然语言查询运维资源的工具。 </p>
 
-<img src="https://cdn.jsdelivr.net/gh/eryajf/tu@main/img/image_20240420_214408.gif" width="800"  height="3">
+<img src="https://cdn.jsdelivr.net/gh/eryajf/tu@main/img/image_20240420_214408.gif" width="100%"  height="3">
 </div><br>
 
 <img align='right' src="./src/zenops.png" width="350" height="350" />
@@ -28,6 +28,12 @@ ZenOps 是一个面向运维领域的数据智能化查询工具，通过统一�
 - **插件化架构**: 易于扩展新的云平台和服务
 
 > 📝 快速入门上手文档：[开源项目ZenOps：带你领略禅意运维](https://wiki.eryajf.net/pages/a908c5/) ，详细介绍了mcp，钉钉，飞书，企微等联动使用的配置方法。
+
+---
+
+![](https://t.eryajf.net/imgs/2025/12/1766657550093.webp)
+
+> 前端页面开发中。
 
 ## 快速开始
 
