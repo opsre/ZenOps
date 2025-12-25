@@ -186,6 +186,7 @@ func (s *HTTPGinServer) registerRoutes() {
 
 		// MCP Server 管理路由 (独立路由组)
 		configHandler := NewConfigHandler()
+		mcpHandler := NewMCPHandler()
 		mcp := v1.Group("/mcp")
 		{
 			mcp.GET("/servers", configHandler.ListMCPServers)
@@ -196,11 +197,38 @@ func (s *HTTPGinServer) registerRoutes() {
 			mcp.PATCH("/servers/:name/toggle", configHandler.ToggleMCPServer)
 			mcp.GET("/servers/:name/tools", configHandler.GetMCPTools)
 			mcp.POST("/servers/:name/tools/:toolName/test", configHandler.TestMCPTool)
+			// MCP 调试接口
+			mcp.POST("/debug/execute", mcpHandler.DebugExecute)
+		}
+
+		// 仪表盘路由
+		dashboardHandler := NewDashboardHandler()
+		dashboard := v1.Group("/dashboard")
+		{
+			dashboard.GET("/stats", dashboardHandler.GetStats)
+			dashboard.GET("/health", dashboardHandler.GetHealth)
+		}
+
+		// 日志路由
+		logHandler := NewLogHandler()
+		logs := v1.Group("/logs")
+		{
+			logs.GET("/mcp", logHandler.GetMCPLogs)
+		}
+
+		// 对话历史路由
+		historyHandler := NewHistoryHandler()
+		history := v1.Group("/history")
+		{
+			history.GET("/chats", historyHandler.GetChatLogs)
+			history.GET("/chats/:id/context", historyHandler.GetChatContext)
 		}
 
 		// 配置管理路由
 		config := v1.Group("/config")
 		{
+			// 全量配置
+			config.GET("", configHandler.GetAllConfig)
 			// LLM 配置
 			config.GET("/llm", configHandler.GetLLMConfig)
 			config.PUT("/llm", configHandler.SaveLLMConfig)

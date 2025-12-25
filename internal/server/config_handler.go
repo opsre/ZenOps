@@ -964,3 +964,119 @@ func (h *ConfigHandler) SetSystemConfig(c *gin.Context) {
 		Message: "System configuration saved successfully",
 	})
 }
+
+// ========== 全量配置 ==========
+
+// GetAllConfig 获取全量配置
+func (h *ConfigHandler) GetAllConfig(c *gin.Context) {
+	// 获取 LLM 配置
+	llmConfig, err := h.configService.GetLLMConfig()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// 获取 IM 配置
+	imConfigs, err := h.configService.ListIMConfigs()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// 获取云厂商账号
+	aliyunAccounts, _ := h.configService.ListProviderAccounts("aliyun")
+	tencentAccounts, _ := h.configService.ListProviderAccounts("tencent")
+
+	// 获取系统配置
+	serverConfigs, _ := h.configService.ListSystemConfigs()
+
+	// 构建响应
+	config := gin.H{
+		"server": gin.H{
+			"http": gin.H{
+				"enabled": true,
+				"port":    8080,
+			},
+			"mcp": gin.H{
+				"enabled":                       true,
+				"port":                          8081,
+				"auto_register_external_tools": true,
+				"tool_name_format":              "{prefix}{name}",
+			},
+		},
+		"logger": gin.H{
+			"level": "info",
+			"file":  "./zenops.log",
+		},
+		"database": gin.H{
+			"driver": "sqlite",
+			"dsn":    "zenops.db",
+		},
+		"llm_providers": []interface{}{},
+		"dingtalk":      gin.H{"enabled": false},
+		"feishu":        gin.H{"enabled": false},
+		"wecom":         gin.H{"enabled": false},
+		"providers": gin.H{
+			"aliyun":  aliyunAccounts,
+			"tencent": tencentAccounts,
+		},
+		"auth": gin.H{
+			"enabled": false,
+			"type":    "token",
+			"tokens":  []string{},
+		},
+		"cache": gin.H{
+			"enabled": true,
+			"type":    "memory",
+			"ttl":     300,
+		},
+		"mcp_servers_config": "./mcp_servers.json",
+	}
+
+	// 填充 LLM 配置
+	if llmConfig != nil {
+		config["llm_providers"] = llmConfig.Providers
+	}
+
+	// 填充 IM 配置
+	for _, im := range imConfigs {
+		switch im.Platform {
+		case "dingtalk":
+			config["dingtalk"] = im
+		case "feishu":
+			config["feishu"] = im
+		case "wecom":
+			config["wecom"] = im
+		}
+	}
+
+	// 从系统配置中读取服务器配置
+	for _, sc := range serverConfigs {
+		switch sc.ConfigKey {
+		case model.ConfigKeyServerHTTPPort:
+			if port, err := strconv.Atoi(sc.ConfigValue); err == nil {
+				serverConfig := config["server"].(gin.H)
+				httpConfig := serverConfig["http"].(gin.H)
+				httpConfig["port"] = port
+			}
+		case model.ConfigKeyServerMCPPort:
+			if port, err := strconv.Atoi(sc.ConfigValue); err == nil {
+				serverConfig := config["server"].(gin.H)
+				mcpConfig := serverConfig["mcp"].(gin.H)
+				mcpConfig["port"] = port
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    0,
+		Message: "success",
+		Data:    config,
+	})
+}

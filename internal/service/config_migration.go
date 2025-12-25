@@ -54,10 +54,17 @@ func (s *ConfigService) migrateLLMConfig(llmCfg config.LLMConfig) error {
 	}
 
 	llm := &model.LLMConfig{
-		Enabled: llmCfg.Enabled,
-		Model:   llmCfg.Model,
-		APIKey:  llmCfg.APIKey,
-		BaseURL: llmCfg.BaseURL,
+		Providers: []model.LLMProviderInstance{
+			{
+				ID:       "1",
+				Name:     "默认 LLM",
+				Enabled:  llmCfg.Enabled,
+				Provider: "custom",
+				Model:    llmCfg.Model,
+				APIKey:   llmCfg.APIKey,
+				BaseURL:  llmCfg.BaseURL,
+			},
+		},
 	}
 
 	return s.SaveLLMConfig(llm)
@@ -299,12 +306,14 @@ func (s *ConfigService) LoadConfigFromDB() (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if llmConfig != nil {
+	if llmConfig != nil && len(llmConfig.Providers) > 0 {
+		// 使用第一个 provider 作为默认配置
+		firstProvider := llmConfig.Providers[0]
 		cfg.LLM = config.LLMConfig{
-			Enabled: llmConfig.Enabled,
-			Model:   llmConfig.Model,
-			APIKey:  llmConfig.APIKey,
-			BaseURL: llmConfig.BaseURL,
+			Enabled: firstProvider.Enabled,
+			Model:   firstProvider.Model,
+			APIKey:  firstProvider.APIKey,
+			BaseURL: firstProvider.BaseURL,
 		}
 	}
 

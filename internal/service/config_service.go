@@ -21,6 +21,11 @@ func NewConfigService() *ConfigService {
 	}
 }
 
+// GetDB 获取数据库连接
+func (s *ConfigService) GetDB() *gorm.DB {
+	return s.db
+}
+
 // ========== LLM 配置管理 ==========
 
 // GetLLMConfig 获取LLM配置
