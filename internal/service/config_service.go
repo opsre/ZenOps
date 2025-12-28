@@ -28,10 +28,17 @@ func (s *ConfigService) GetDB() *gorm.DB {
 
 // ========== LLM 配置管理 ==========
 
-// GetLLMConfig 获取LLM配置
-func (s *ConfigService) GetLLMConfig() (*model.LLMConfig, error) {
+// ListLLMConfigs 列出所有LLM配置
+func (s *ConfigService) ListLLMConfigs() ([]model.LLMConfig, error) {
+	var configs []model.LLMConfig
+	err := s.db.Order("id").Find(&configs).Error
+	return configs, err
+}
+
+// GetLLMConfig 获取指定ID的LLM配置
+func (s *ConfigService) GetLLMConfig(id uint) (*model.LLMConfig, error) {
 	var config model.LLMConfig
-	err := s.db.First(&config).Error
+	err := s.db.First(&config, id).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil
@@ -41,21 +48,47 @@ func (s *ConfigService) GetLLMConfig() (*model.LLMConfig, error) {
 	return &config, nil
 }
 
-// SaveLLMConfig 保存LLM配置(新建或更新)
-func (s *ConfigService) SaveLLMConfig(config *model.LLMConfig) error {
-	// 检查是否已存在配置
-	var existing model.LLMConfig
-	err := s.db.First(&existing).Error
-	if err == nil {
-		// 存在则更新
-		config.ID = existing.ID
-		return s.db.Save(config).Error
+// GetLLMConfigByName 根据名称获取LLM配置
+func (s *ConfigService) GetLLMConfigByName(name string) (*model.LLMConfig, error) {
+	var config model.LLMConfig
+	err := s.db.Where("name = ?", name).First(&config).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
 	}
-	if err == gorm.ErrRecordNotFound {
-		// 不存在则创建
-		return s.db.Create(config).Error
+	return &config, nil
+}
+
+// CreateLLMConfig 创建LLM配置
+func (s *ConfigService) CreateLLMConfig(config *model.LLMConfig) error {
+	// 检查是否已存在同名配置
+	existing, err := s.GetLLMConfigByName(config.Name)
+	if err != nil {
+		return err
 	}
-	return err
+	if existing != nil {
+		return fmt.Errorf("LLM config already exists: %s", config.Name)
+	}
+	return s.db.Create(config).Error
+}
+
+// UpdateLLMConfig 更新LLM配置
+func (s *ConfigService) UpdateLLMConfig(config *model.LLMConfig) error {
+	return s.db.Save(config).Error
+}
+
+// DeleteLLMConfig 删除LLM配置
+func (s *ConfigService) DeleteLLMConfig(id uint) error {
+	return s.db.Delete(&model.LLMConfig{}, id).Error
+}
+
+// GetEnabledLLMConfigs 获取所有启用的LLM配置
+func (s *ConfigService) GetEnabledLLMConfigs() ([]model.LLMConfig, error) {
+	var configs []model.LLMConfig
+	err := s.db.Where("enabled = ?", true).Order("id").Find(&configs).Error
+	return configs, err
 }
 
 // ========== 云厂商账号配置管理 ==========

@@ -90,18 +90,18 @@ func (h *DashboardHandler) GetHealth(c *gin.Context) {
 	}
 
 	// 检查 LLM Provider 状态
-	var llmConfig model.LLMConfig
-	if err := db.First(&llmConfig).Error; err == nil {
-		for _, provider := range llmConfig.Providers {
+	var llmConfigs []model.LLMConfig
+	if err := db.Find(&llmConfigs).Error; err == nil {
+		for _, llm := range llmConfigs {
 			status := "offline"
 			uptime := "0%"
-			if provider.Enabled {
+			if llm.Enabled {
 				status = "online"
 				uptime = "98.5%" // TODO: 实际应该从监控数据计算
 			}
 
 			components = append(components, gin.H{
-				"label":  provider.Name + " Provider",
+				"label":  llm.Name + " Provider",
 				"status": status,
 				"uptime": uptime,
 			})

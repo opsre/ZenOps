@@ -44,30 +44,25 @@ func (s *ConfigService) MigrateFromYAML(cfg *config.Config) error {
 
 // migrateLLMConfig 迁移LLM配置
 func (s *ConfigService) migrateLLMConfig(llmCfg config.LLMConfig) error {
-	existing, err := s.GetLLMConfig()
+	existing, err := s.ListLLMConfigs()
 	if err != nil {
 		return err
 	}
-	if existing != nil {
+	if len(existing) > 0 {
 		log.Println("LLM config already exists in database, skipping migration")
 		return nil
 	}
 
 	llm := &model.LLMConfig{
-		Providers: []model.LLMProviderInstance{
-			{
-				ID:       "1",
-				Name:     "默认 LLM",
-				Enabled:  llmCfg.Enabled,
-				Provider: "custom",
-				Model:    llmCfg.Model,
-				APIKey:   llmCfg.APIKey,
-				BaseURL:  llmCfg.BaseURL,
-			},
-		},
+		Name:    "默认 LLM",
+		Enabled: llmCfg.Enabled,
+		Provider: "custom",
+		Model:   llmCfg.Model,
+		APIKey:  llmCfg.APIKey,
+		BaseURL: llmCfg.BaseURL,
 	}
 
-	return s.SaveLLMConfig(llm)
+	return s.CreateLLMConfig(llm)
 }
 
 // migrateProviders 迁移云厂商配置
@@ -153,16 +148,13 @@ func (s *ConfigService) migrateIMConfigs(cfg *config.Config) error {
 		if existing != nil {
 			log.Println("DingTalk config already exists, skipping")
 		} else {
-			configData := model.JSONMap{
-				"app_key":          cfg.DingTalk.AppKey,
-				"app_secret":       cfg.DingTalk.AppSecret,
-				"agent_id":         cfg.DingTalk.AgentID,
-				"card_template_id": cfg.DingTalk.CardTemplateID,
-			}
 			imConfig := &model.IMConfig{
 				Platform:   "dingtalk",
 				Enabled:    cfg.DingTalk.Enabled,
-				ConfigData: configData,
+				AppID:      cfg.DingTalk.AgentID, // 钉钉用 AgentID 作为 AppID
+				AppKey:     cfg.DingTalk.AppKey,
+				AgentID:    cfg.DingTalk.AgentID,
+				TemplateID: cfg.DingTalk.CardTemplateID,
 			}
 			if err := s.SaveIMConfig(imConfig); err != nil {
 				return err
@@ -180,14 +172,11 @@ func (s *ConfigService) migrateIMConfigs(cfg *config.Config) error {
 		if existing != nil {
 			log.Println("Feishu config already exists, skipping")
 		} else {
-			configData := model.JSONMap{
-				"app_id":     cfg.Feishu.AppID,
-				"app_secret": cfg.Feishu.AppSecret,
-			}
 			imConfig := &model.IMConfig{
-				Platform:   "feishu",
-				Enabled:    cfg.Feishu.Enabled,
-				ConfigData: configData,
+				Platform: "feishu",
+				Enabled:  cfg.Feishu.Enabled,
+				AppID:    cfg.Feishu.AppID,
+				AppKey:   cfg.Feishu.AppSecret,
 			}
 			if err := s.SaveIMConfig(imConfig); err != nil {
 				return err
@@ -205,14 +194,11 @@ func (s *ConfigService) migrateIMConfigs(cfg *config.Config) error {
 		if existing != nil {
 			log.Println("Wecom config already exists, skipping")
 		} else {
-			configData := model.JSONMap{
-				"token":            cfg.Wecom.Token,
-				"encoding_aes_key": cfg.Wecom.EncodingAESKey,
-			}
 			imConfig := &model.IMConfig{
-				Platform:   "wecom",
-				Enabled:    cfg.Wecom.Enabled,
-				ConfigData: configData,
+				Platform: "wecom",
+				Enabled:  cfg.Wecom.Enabled,
+				AppKey:   cfg.Wecom.Token,
+				AgentID:  cfg.Wecom.EncodingAESKey, // 临时存储 AES Key
 			}
 			if err := s.SaveIMConfig(imConfig); err != nil {
 				return err
@@ -302,18 +288,32 @@ func (s *ConfigService) LoadConfigFromDB() (*config.Config, error) {
 	cfg := &config.Config{}
 
 	// 1. 加载 LLM 配置
-	llmConfig, err := s.GetLLMConfig()
+	llmConfigs, err := s.ListLLMConfigs()
 	if err != nil {
 		return nil, err
 	}
-	if llmConfig != nil && len(llmConfig.Providers) > 0 {
-		// 使用第一个 provider 作为默认配置
-		firstProvider := llmConfig.Providers[0]
-		cfg.LLM = config.LLMConfig{
-			Enabled: firstProvider.Enabled,
-			Model:   firstProvider.Model,
-			APIKey:  firstProvider.APIKey,
-			BaseURL: firstProvider.BaseURL,
+	if len(llmConfigs) > 0 {
+		// 使用第一个启用的 LLM 配置作为默认配置
+		for _, llm := range llmConfigs {
+			if llm.Enabled {
+				cfg.LLM = config.LLMConfig{
+					Enabled: llm.Enabled,
+					Model:   llm.Model,
+					APIKey:  llm.APIKey,
+					BaseURL: llm.BaseURL,
+				}
+				break
+			}
+		}
+		// 如果没有启用的，使用第一个
+		if cfg.LLM.Model == "" && len(llmConfigs) > 0 {
+			firstLLM := llmConfigs[0]
+			cfg.LLM = config.LLMConfig{
+				Enabled: firstLLM.Enabled,
+				Model:   firstLLM.Model,
+				APIKey:  firstLLM.APIKey,
+				BaseURL: firstLLM.BaseURL,
+			}
 		}
 	}
 
@@ -389,10 +389,10 @@ func (s *ConfigService) LoadIMConfigsFromDB(cfg *config.Config) error {
 	if dingtalk != nil {
 		cfg.DingTalk = config.DingTalkConfig{
 			Enabled:        dingtalk.Enabled,
-			AppKey:         getStringFromJSONMap(dingtalk.ConfigData, "app_key"),
-			AppSecret:      getStringFromJSONMap(dingtalk.ConfigData, "app_secret"),
-			AgentID:        getStringFromJSONMap(dingtalk.ConfigData, "agent_id"),
-			CardTemplateID: getStringFromJSONMap(dingtalk.ConfigData, "card_template_id"),
+			AppKey:         dingtalk.AppKey,
+			AppSecret:      dingtalk.AppKey, // 使用 AppKey 作为 Secret
+			AgentID:        dingtalk.AgentID,
+			CardTemplateID: dingtalk.TemplateID,
 		}
 	}
 
@@ -404,8 +404,8 @@ func (s *ConfigService) LoadIMConfigsFromDB(cfg *config.Config) error {
 	if feishu != nil {
 		cfg.Feishu = config.FeishuConfig{
 			Enabled:   feishu.Enabled,
-			AppID:     getStringFromJSONMap(feishu.ConfigData, "app_id"),
-			AppSecret: getStringFromJSONMap(feishu.ConfigData, "app_secret"),
+			AppID:     feishu.AppID,
+			AppSecret: feishu.AppKey,
 		}
 	}
 
@@ -417,8 +417,8 @@ func (s *ConfigService) LoadIMConfigsFromDB(cfg *config.Config) error {
 	if wecom != nil {
 		cfg.Wecom = config.WecomConfig{
 			Enabled:        wecom.Enabled,
-			Token:          getStringFromJSONMap(wecom.ConfigData, "token"),
-			EncodingAESKey: getStringFromJSONMap(wecom.ConfigData, "encoding_aes_key"),
+			Token:          wecom.AppKey,
+			EncodingAESKey: wecom.AgentID,
 		}
 	}
 
@@ -496,15 +496,6 @@ func (s *ConfigService) LoadSystemConfigsFromDB(cfg *config.Config) error {
 }
 
 // 辅助函数
-
-func getStringFromJSONMap(m model.JSONMap, key string) string {
-	if val, ok := m[key]; ok {
-		if str, ok := val.(string); ok {
-			return str
-		}
-	}
-	return ""
-}
 
 func (s *ConfigService) getSystemConfigString(key string) (string, error) {
 	cfg, err := s.GetSystemConfig(key)

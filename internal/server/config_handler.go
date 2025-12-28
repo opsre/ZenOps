@@ -24,9 +24,9 @@ func NewConfigHandler() *ConfigHandler {
 
 // ========== LLM 配置 ==========
 
-// GetLLMConfig 获取 LLM 配置
-func (h *ConfigHandler) GetLLMConfig(c *gin.Context) {
-	config, err := h.configService.GetLLMConfig()
+// ListLLMConfigs 列出所有 LLM 配置
+func (h *ConfigHandler) ListLLMConfigs(c *gin.Context) {
+	configs, err := h.configService.ListLLMConfigs()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, Response{
 			Code:    500,
@@ -38,12 +38,48 @@ func (h *ConfigHandler) GetLLMConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, Response{
 		Code:    200,
 		Message: "success",
+		Data:    configs,
+	})
+}
+
+// GetLLMConfig 获取指定 LLM 配置
+func (h *ConfigHandler) GetLLMConfig(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: "invalid id",
+		})
+		return
+	}
+
+	config, err := h.configService.GetLLMConfig(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if config == nil {
+		c.JSON(http.StatusNotFound, Response{
+			Code:    404,
+			Message: "LLM config not found",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "success",
 		Data:    config,
 	})
 }
 
-// SaveLLMConfig 保存 LLM 配置
-func (h *ConfigHandler) SaveLLMConfig(c *gin.Context) {
+// CreateLLMConfig 创建 LLM 配置
+func (h *ConfigHandler) CreateLLMConfig(c *gin.Context) {
 	var config model.LLMConfig
 	if err := c.ShouldBindJSON(&config); err != nil {
 		c.JSON(http.StatusBadRequest, Response{
@@ -53,7 +89,7 @@ func (h *ConfigHandler) SaveLLMConfig(c *gin.Context) {
 		return
 	}
 
-	if err := h.configService.SaveLLMConfig(&config); err != nil {
+	if err := h.configService.CreateLLMConfig(&config); err != nil {
 		c.JSON(http.StatusInternalServerError, Response{
 			Code:    500,
 			Message: err.Error(),
@@ -63,7 +99,126 @@ func (h *ConfigHandler) SaveLLMConfig(c *gin.Context) {
 
 	c.JSON(http.StatusOK, Response{
 		Code:    200,
-		Message: "LLM configuration saved successfully",
+		Message: "LLM configuration created successfully",
+		Data:    config,
+	})
+}
+
+// UpdateLLMConfig 更新 LLM 配置
+func (h *ConfigHandler) UpdateLLMConfig(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: "invalid id",
+		})
+		return
+	}
+
+	var config model.LLMConfig
+	if err := c.ShouldBindJSON(&config); err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	config.ID = uint(id)
+	if err := h.configService.UpdateLLMConfig(&config); err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "LLM configuration updated successfully",
+		Data:    config,
+	})
+}
+
+// DeleteLLMConfig 删除 LLM 配置
+func (h *ConfigHandler) DeleteLLMConfig(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: "invalid id",
+		})
+		return
+	}
+
+	if err := h.configService.DeleteLLMConfig(uint(id)); err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "LLM configuration deleted successfully",
+	})
+}
+
+// ToggleLLMConfig 切换 LLM 配置启用状态
+func (h *ConfigHandler) ToggleLLMConfig(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: "invalid id",
+		})
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	config, err := h.configService.GetLLMConfig(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if config == nil {
+		c.JSON(http.StatusNotFound, Response{
+			Code:    404,
+			Message: "LLM config not found",
+		})
+		return
+	}
+
+	config.Enabled = req.Enabled
+	if err := h.configService.UpdateLLMConfig(config); err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "LLM configuration status updated successfully",
 		Data:    config,
 	})
 }
@@ -137,10 +292,18 @@ func (h *ConfigHandler) CreateProviderAccount(c *gin.Context) {
 		return
 	}
 
+	// 返回前端期望的格式
 	c.JSON(http.StatusOK, Response{
 		Code:    200,
 		Message: "Provider account created successfully",
-		Data:    account,
+		Data: gin.H{
+			"id":      account.ID,
+			"name":    account.Name,
+			"enabled": account.Enabled,
+			"ak":      account.AccessKey,
+			"sk":      account.SecretKey,
+			"regions": account.Regions,
+		},
 	})
 }
 
@@ -174,10 +337,18 @@ func (h *ConfigHandler) UpdateProviderAccount(c *gin.Context) {
 		return
 	}
 
+	// 返回前端期望的格式
 	c.JSON(http.StatusOK, Response{
 		Code:    200,
 		Message: "Provider account updated successfully",
-		Data:    account,
+		Data: gin.H{
+			"id":      account.ID,
+			"name":    account.Name,
+			"enabled": account.Enabled,
+			"ak":      account.AccessKey,
+			"sk":      account.SecretKey,
+			"regions": account.Regions,
+		},
 	})
 }
 
@@ -969,8 +1140,8 @@ func (h *ConfigHandler) SetSystemConfig(c *gin.Context) {
 
 // GetAllConfig 获取全量配置
 func (h *ConfigHandler) GetAllConfig(c *gin.Context) {
-	// 获取 LLM 配置
-	llmConfig, err := h.configService.GetLLMConfig()
+	// 获取 LLM 配置列表
+	llmConfigs, err := h.configService.ListLLMConfigs()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, Response{
 			Code:    500,
@@ -989,9 +1160,25 @@ func (h *ConfigHandler) GetAllConfig(c *gin.Context) {
 		return
 	}
 
-	// 获取云厂商账号
+	// 获取云厂商账号并转换为前端格式
 	aliyunAccounts, _ := h.configService.ListProviderAccounts("aliyun")
 	tencentAccounts, _ := h.configService.ListProviderAccounts("tencent")
+
+	// 转换为前端期望的格式 (ak/sk)
+	convertAccounts := func(accounts []model.ProviderAccount) []gin.H {
+		result := make([]gin.H, len(accounts))
+		for i, acc := range accounts {
+			result[i] = gin.H{
+				"id":      acc.ID,
+				"name":    acc.Name,
+				"enabled": acc.Enabled,
+				"ak":      acc.AccessKey,
+				"sk":      acc.SecretKey,
+				"regions": acc.Regions,
+			}
+		}
+		return result
+	}
 
 	// 获取系统配置
 	serverConfigs, _ := h.configService.ListSystemConfigs()
@@ -1004,10 +1191,10 @@ func (h *ConfigHandler) GetAllConfig(c *gin.Context) {
 				"port":    8080,
 			},
 			"mcp": gin.H{
-				"enabled":                       true,
-				"port":                          8081,
+				"enabled":                      true,
+				"port":                         8081,
 				"auto_register_external_tools": true,
-				"tool_name_format":              "{prefix}{name}",
+				"tool_name_format":             "{prefix}{name}",
 			},
 		},
 		"logger": gin.H{
@@ -1018,13 +1205,13 @@ func (h *ConfigHandler) GetAllConfig(c *gin.Context) {
 			"driver": "sqlite",
 			"dsn":    "zenops.db",
 		},
-		"llm_providers": []interface{}{},
+		"llm_providers": llmConfigs,
 		"dingtalk":      gin.H{"enabled": false},
 		"feishu":        gin.H{"enabled": false},
 		"wecom":         gin.H{"enabled": false},
 		"providers": gin.H{
-			"aliyun":  aliyunAccounts,
-			"tencent": tencentAccounts,
+			"aliyun":  convertAccounts(aliyunAccounts),
+			"tencent": convertAccounts(tencentAccounts),
 		},
 		"auth": gin.H{
 			"enabled": false,
@@ -1037,11 +1224,6 @@ func (h *ConfigHandler) GetAllConfig(c *gin.Context) {
 			"ttl":     300,
 		},
 		"mcp_servers_config": "./mcp_servers.json",
-	}
-
-	// 填充 LLM 配置
-	if llmConfig != nil {
-		config["llm_providers"] = llmConfig.Providers
 	}
 
 	// 填充 IM 配置

@@ -240,10 +240,13 @@ func (s *HTTPGinServer) registerRoutes() {
 		{
 			// 全量配置
 			config.GET("", configHandler.GetAllConfig)
-			// LLM 配置
-			config.GET("/llm", configHandler.GetLLMConfig)
-			config.PUT("/llm", configHandler.SaveLLMConfig)
-			config.POST("/llm", configHandler.SaveLLMConfig) // 兼容 POST
+			// LLM 配置 (RESTful 风格)
+			config.GET("/llm", configHandler.ListLLMConfigs)
+			config.POST("/llm", configHandler.CreateLLMConfig)
+			config.GET("/llm/:id", configHandler.GetLLMConfig)
+			config.PUT("/llm/:id", configHandler.UpdateLLMConfig)
+			config.DELETE("/llm/:id", configHandler.DeleteLLMConfig)
+			config.PATCH("/llm/:id/toggle", configHandler.ToggleLLMConfig)
 
 			// 云厂商账号配置 (改为单数 provider)
 			config.GET("/provider", configHandler.ListProviderAccounts)

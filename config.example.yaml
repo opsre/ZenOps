@@ -42,7 +42,6 @@ dingtalk:
   # 钉钉应用凭证
   app_key: "YOUR_DINGTALK_APP_KEY"
   app_secret: "YOUR_DINGTALK_APP_SECRET"
-  agent_id: "YOUR_AGENT_ID"
   # 流式卡片配置
   card_template_id: ""  # AI 流式卡片模板 ID(可选,需要在钉钉开放平台创建)
 
