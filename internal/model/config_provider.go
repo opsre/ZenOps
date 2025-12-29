@@ -17,9 +17,20 @@ func (sa *StringArray) Scan(value interface{}) error {
 		return nil
 	}
 
-	bytes, ok := value.([]byte)
-	if !ok {
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
 		return fmt.Errorf("failed to unmarshal StringArray value: %v", value)
+	}
+
+	// 处理空字符串
+	if len(bytes) == 0 {
+		*sa = []string{}
+		return nil
 	}
 
 	return json.Unmarshal(bytes, sa)

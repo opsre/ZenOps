@@ -14,6 +14,7 @@ zenops
 *.out
 coverage.html
 zenops.db
+zenops-web
 
 # Go workspace file
 go.work

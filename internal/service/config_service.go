@@ -221,7 +221,7 @@ func (s *ConfigService) ListCICDConfigs() ([]model.CICDConfig, error) {
 // ListMCPServers 列出MCP服务器
 func (s *ConfigService) ListMCPServers() ([]model.MCPServer, error) {
 	var servers []model.MCPServer
-	err := s.db.Order("name").Find(&servers).Error
+	err := s.db.Preload("Tools").Order("name").Find(&servers).Error
 	return servers, err
 }
 
@@ -238,7 +238,7 @@ func (s *ConfigService) GetMCPServer(id uint) (*model.MCPServer, error) {
 // GetMCPServerByName 根据名称获取MCP服务器
 func (s *ConfigService) GetMCPServerByName(name string) (*model.MCPServer, error) {
 	var server model.MCPServer
-	err := s.db.Where("name = ?", name).First(&server).Error
+	err := s.db.Preload("Tools").Where("name = ?", name).First(&server).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil
@@ -269,6 +269,30 @@ func (s *ConfigService) UpdateMCPServer(server *model.MCPServer) error {
 // DeleteMCPServer 删除MCP服务器
 func (s *ConfigService) DeleteMCPServer(id uint) error {
 	return s.db.Delete(&model.MCPServer{}, id).Error
+}
+
+// ========== MCP Tool 配置管理 ==========
+
+// CreateMCPTool 创建MCP工具
+func (s *ConfigService) CreateMCPTool(tool *model.MCPTool) error {
+	return s.db.Create(tool).Error
+}
+
+// DeleteMCPToolsByServerID 删除指定服务器的所有工具
+func (s *ConfigService) DeleteMCPToolsByServerID(serverID uint) error {
+	return s.db.Where("server_id = ?", serverID).Delete(&model.MCPTool{}).Error
+}
+
+// GetMCPToolsByServerID 获取指定服务器的所有工具
+func (s *ConfigService) GetMCPToolsByServerID(serverID uint) ([]model.MCPTool, error) {
+	var tools []model.MCPTool
+	err := s.db.Where("server_id = ?", serverID).Find(&tools).Error
+	return tools, err
+}
+
+// UpdateMCPTool 更新MCP工具
+func (s *ConfigService) UpdateMCPTool(tool *model.MCPTool) error {
+	return s.db.Save(tool).Error
 }
 
 // ========== 系统配置管理 ==========

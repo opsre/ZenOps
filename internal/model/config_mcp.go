@@ -25,6 +25,7 @@ type MCPServer struct {
 	ProviderURL   string      `gorm:"type:text" json:"provider_url"`
 	LogoURL       string      `gorm:"type:text" json:"logo_url"`
 	Tags          StringArray `gorm:"type:text" json:"tags"`
+	Tools         []MCPTool   `gorm:"foreignKey:ServerID" json:"tools"` // 关联的工具列表
 	CreatedAt     time.Time   `json:"created_at"`
 	UpdatedAt     time.Time   `json:"updated_at"`
 }

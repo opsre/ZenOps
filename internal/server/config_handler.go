@@ -5,10 +5,28 @@ import (
 	"net/http"
 	"strconv"
 
+	"cnb.cool/zhiqiangwang/pkg/logx"
+	"github.com/eryajf/zenops/internal/mcpclient"
 	"github.com/eryajf/zenops/internal/model"
 	"github.com/eryajf/zenops/internal/service"
 	"github.com/gin-gonic/gin"
 )
+
+// 全局 MCP 客户端管理器
+var globalMCPManager *mcpclient.Manager
+
+// GetGlobalMCPManager 获取全局 MCP 客户端管理器
+func GetGlobalMCPManager() *mcpclient.Manager {
+	if globalMCPManager == nil {
+		globalMCPManager = mcpclient.NewManager()
+	}
+	return globalMCPManager
+}
+
+// SetGlobalMCPManager 设置全局 MCP 客户端管理器
+func SetGlobalMCPManager(m *mcpclient.Manager) {
+	globalMCPManager = m
+}
 
 // ConfigHandler 配置管理处理器
 type ConfigHandler struct {
@@ -715,6 +733,111 @@ func (h *ConfigHandler) ToggleMCPServer(c *gin.Context) {
 		return
 	}
 
+	// 获取全局 MCP 管理器
+	mcpManager := GetGlobalMCPManager()
+
+	// 根据启用/禁用状态执行连接/断开操作
+	if req.IsActive {
+		// 启用：尝试连接 MCP 服务器
+		if !mcpManager.IsRegistered(name) {
+			// 转换 env 和 headers
+			env := make(map[string]string)
+			if server.Env != nil {
+				for k, v := range server.Env {
+					// 尝试多种类型转换
+					switch val := v.(type) {
+					case string:
+						env[k] = val
+					case fmt.Stringer:
+						env[k] = val.String()
+					default:
+						env[k] = fmt.Sprintf("%v", val)
+					}
+				}
+			}
+			headers := make(map[string]string)
+			if server.Headers != nil {
+				for k, v := range server.Headers {
+					// 尝试多种类型转换
+					switch val := v.(type) {
+					case string:
+						headers[k] = val
+					case fmt.Stringer:
+						headers[k] = val.String()
+					default:
+						headers[k] = fmt.Sprintf("%v", val)
+					}
+				}
+			}
+
+			// 注册并连接 MCP 客户端
+			logx.Info("Attempting to register MCP server: %s (type: %s, command: %s, args: %v)",
+				name, server.Type, server.Command, server.Args)
+
+			if err := mcpManager.RegisterFromDB(
+				name,
+				server.Type,
+				server.Command,
+				server.Args,
+				env,
+				server.BaseURL,
+				headers,
+				server.Timeout,
+			); err != nil {
+				logx.Error("Failed to register MCP server %s: %v", name, err)
+				c.JSON(http.StatusInternalServerError, Response{
+					Code:    500,
+					Message: fmt.Sprintf("Failed to connect MCP server: %v", err),
+				})
+				return
+			}
+
+			// 连接成功后，获取并保存工具列表到数据库
+			mcpClient, err := mcpManager.Get(name)
+			if err == nil && mcpClient != nil {
+				// 先删除该服务器的旧工具
+				if err := h.configService.DeleteMCPToolsByServerID(server.ID); err != nil {
+					fmt.Printf("Warning: Failed to delete old tools for server %s: %v\n", name, err)
+				}
+
+				// 保存新的工具列表
+				for _, tool := range mcpClient.Tools {
+					// 转换 InputSchema
+					inputSchema := make(map[string]interface{})
+					if tool.InputSchema.Type != "" {
+						inputSchema["type"] = tool.InputSchema.Type
+					}
+					if tool.InputSchema.Properties != nil {
+						inputSchema["properties"] = tool.InputSchema.Properties
+					}
+					if tool.InputSchema.Required != nil {
+						inputSchema["required"] = tool.InputSchema.Required
+					}
+
+					mcpTool := model.MCPTool{
+						ServerID:    server.ID,
+						Name:        tool.Name,
+						Description: tool.Description,
+						IsEnabled:   true,
+						InputSchema: inputSchema,
+					}
+					if err := h.configService.CreateMCPTool(&mcpTool); err != nil {
+						fmt.Printf("Warning: Failed to save tool %s for server %s: %v\n", tool.Name, name, err)
+					}
+				}
+			}
+		}
+	} else {
+		// 禁用：断开 MCP 服务器连接
+		if mcpManager.IsRegistered(name) {
+			if err := mcpManager.Unregister(name); err != nil {
+				// 忽略断开连接的错误，继续更新状态
+				fmt.Printf("Warning: Failed to disconnect MCP server %s: %v\n", name, err)
+			}
+		}
+	}
+
+	// 更新数据库状态
 	server.IsActive = req.IsActive
 	if err := h.configService.UpdateMCPServer(server); err != nil {
 		c.JSON(http.StatusInternalServerError, Response{
@@ -724,11 +847,27 @@ func (h *ConfigHandler) ToggleMCPServer(c *gin.Context) {
 		return
 	}
 
+	// 重新加载服务器信息（包括工具列表）
+	updatedServer, err := h.configService.GetMCPServerByName(name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	status := "disconnected"
+	if req.IsActive && mcpManager.IsRegistered(name) {
+		status = "connected"
+	}
+
 	c.JSON(http.StatusOK, Response{
 		Code:    200,
 		Message: "MCP server status updated successfully",
 		Data: gin.H{
-			"server": server,
+			"server": updatedServer,
+			"status": status,
 		},
 	})
 }

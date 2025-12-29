@@ -277,3 +277,33 @@ func (m *Manager) CloseAll() {
 	}
 	m.clients = make(map[string]*MCPClient)
 }
+
+// RegisterFromDB 从数据库模型注册 MCP 客户端
+func (m *Manager) RegisterFromDB(name string, serverType string, command string, args []string, env map[string]string, baseURL string, headers map[string]string, timeout int) error {
+	// 创建配置
+	cfg := &config.MCPServerConfig{
+		Type:     serverType,
+		Command:  command,
+		Args:     args,
+		Env:      env,
+		BaseURL:  baseURL,
+		Headers:  headers,
+		Timeout:  timeout,
+		IsActive: true,
+	}
+
+	return m.Register(name, cfg)
+}
+
+// IsRegistered 检查客户端是否已注册
+func (m *Manager) IsRegistered(name string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, exists := m.clients[name]
+	return exists
+}
+
+// Unregister 注销一个 MCP 客户端（不删除配置，只断开连接）
+func (m *Manager) Unregister(name string) error {
+	return m.Close(name)
+}

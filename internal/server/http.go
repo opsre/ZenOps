@@ -21,11 +21,12 @@ import (
 
 // HTTPGinServer 基于 Gin 的 HTTP 服务器
 type HTTPGinServer struct {
-	config        *config.Config
-	engine        *gin.Engine
-	server        *http.Server
-	mcpServer     *imcp.MCPServer
-	wecomHandler  *wecom.MessageHandler
+	config         *config.Config
+	engine         *gin.Engine
+	server         *http.Server
+	mcpServer      *imcp.MCPServer
+	wecomHandler   *wecom.MessageHandler
+	serviceManager *ServiceManager
 }
 
 // NewHTTPGinServer 创建基于 Gin 的 HTTP 服务器
@@ -58,6 +59,9 @@ func NewHTTPGinServer(cfg *config.Config) *HTTPGinServer {
 func (s *HTTPGinServer) SetMCPServer(mcpServer *imcp.MCPServer) {
 	s.mcpServer = mcpServer
 
+	// 创建服务管理器
+	s.serviceManager = NewServiceManager(s.config, mcpServer)
+
 	// 如果启用了企业微信,初始化消息处理器
 	if s.config.Wecom.Enabled {
 		handler, err := wecom.NewMessageHandler(s.config, mcpServer)
@@ -68,6 +72,21 @@ func (s *HTTPGinServer) SetMCPServer(mcpServer *imcp.MCPServer) {
 			logx.Info("Wecom message handler initialized")
 		}
 	}
+
+	// 注册服务管理路由
+	s.registerServiceRoutes()
+
+	// 从数据库同步并启动已启用的 IM 服务
+	go func() {
+		if err := s.serviceManager.SyncWithDatabase(context.Background()); err != nil {
+			logx.Error("Failed to sync IM services from database: %v", err)
+		}
+	}()
+}
+
+// GetServiceManager 获取服务管理器
+func (s *HTTPGinServer) GetServiceManager() *ServiceManager {
+	return s.serviceManager
 }
 
 // registerMiddlewares 注册中间件
@@ -284,6 +303,24 @@ func (s *HTTPGinServer) registerRoutes() {
 
 	// 前端静态文件服务 (SPA 模式)
 	s.registerStaticFiles()
+}
+
+// registerServiceRoutes 注册服务管理路由
+func (s *HTTPGinServer) registerServiceRoutes() {
+	if s.serviceManager == nil {
+		logx.Warn("ServiceManager is nil, skipping service routes registration")
+		return
+	}
+
+	serviceHandler := NewServiceHandler(s.serviceManager)
+
+	// 服务管理路由
+	services := s.engine.Group("/api/v1/services")
+	{
+		services.GET("/status", serviceHandler.GetServiceStatus)
+		services.GET("/status/:platform", serviceHandler.GetPlatformStatus)
+		services.POST("/toggle/:platform", serviceHandler.ToggleIMService)
+	}
 }
 
 // registerStaticFiles 注册前端静态文件服务
@@ -1408,7 +1445,9 @@ func createAliyunClient(ak, sk, region string) (*aliyunprovider.Client, error) {
 
 // handleWecomVerify 处理企业微信URL验证
 func (s *HTTPGinServer) handleWecomVerify(c *gin.Context) {
-	if s.wecomHandler == nil {
+	// 优先从 ServiceManager 获取 handler
+	handler := s.getWecomHandler()
+	if handler == nil {
 		s.error(c, http.StatusServiceUnavailable, "Wecom handler not initialized")
 		return
 	}
@@ -1420,7 +1459,7 @@ func (s *HTTPGinServer) handleWecomVerify(c *gin.Context) {
 
 	logx.Info("Wecom verify request: signature=%s, timestamp=%s, nonce=%s", signature, timestamp, nonce)
 
-	replyEchoStr, err := s.wecomHandler.Client.VerifyURL(signature, timestamp, nonce, echoStr)
+	replyEchoStr, err := handler.Client.VerifyURL(signature, timestamp, nonce, echoStr)
 	if err != nil {
 		logx.Error("Failed to verify Wecom URL: %v", err)
 		s.error(c, http.StatusBadRequest, fmt.Sprintf("Verification failed: %v", err))
@@ -1432,7 +1471,9 @@ func (s *HTTPGinServer) handleWecomVerify(c *gin.Context) {
 
 // handleWecomMessage 处理企业微信消息回调
 func (s *HTTPGinServer) handleWecomMessage(c *gin.Context) {
-	if s.wecomHandler == nil {
+	// 优先从 ServiceManager 获取 handler
+	handler := s.getWecomHandler()
+	if handler == nil {
 		s.error(c, http.StatusServiceUnavailable, "Wecom handler not initialized")
 		return
 	}
@@ -1453,7 +1494,7 @@ func (s *HTTPGinServer) handleWecomMessage(c *gin.Context) {
 		signature, timestamp, nonce, string(body))
 
 	// 解密消息
-	req, err := s.wecomHandler.Client.DecryptUserReq(signature, timestamp, nonce, string(body))
+	req, err := handler.Client.DecryptUserReq(signature, timestamp, nonce, string(body))
 	if err != nil {
 		logx.Error("Failed to decrypt Wecom message: %v", err)
 		c.String(http.StatusOK, "") // 企业微信要求返回200
@@ -1467,7 +1508,7 @@ func (s *HTTPGinServer) handleWecomMessage(c *gin.Context) {
 	switch req.Msgtype {
 	case "text":
 		// 处理文本消息
-		response, err = s.wecomHandler.HandleTextMessage(ctx, req)
+		response, err = handler.HandleTextMessage(ctx, req)
 		if err != nil {
 			logx.Error("Failed to handle text message: %v", err)
 			c.String(http.StatusOK, "")
@@ -1476,7 +1517,7 @@ func (s *HTTPGinServer) handleWecomMessage(c *gin.Context) {
 
 	case "stream":
 		// 处理流式轮询请求
-		response, err = s.wecomHandler.HandleStreamRequest(ctx, req)
+		response, err = handler.HandleStreamRequest(ctx, req)
 		if err != nil {
 			logx.Error("Failed to handle stream request: %v", err)
 			c.String(http.StatusOK, "")
@@ -1492,4 +1533,16 @@ func (s *HTTPGinServer) handleWecomMessage(c *gin.Context) {
 	// 返回加密响应
 	c.Header("Content-Type", "application/json")
 	c.String(http.StatusOK, response)
+}
+
+// getWecomHandler 获取企业微信处理器（优先从 ServiceManager 获取）
+func (s *HTTPGinServer) getWecomHandler() *wecom.MessageHandler {
+	// 优先从 ServiceManager 获取
+	if s.serviceManager != nil {
+		if handler := s.serviceManager.GetWecomHandler(); handler != nil {
+			return handler
+		}
+	}
+	// 回退到本地 handler
+	return s.wecomHandler
 }
