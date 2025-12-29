@@ -146,13 +146,19 @@ func (m *Manager) createSSEClient(cfg *config.MCPServerConfig) (*client.Client, 
 		opts = append(opts, transport.WithHeaders(cfg.Headers))
 	}
 
-	logx.Debug("Creating SSE MCP client: baseURL=%s", cfg.BaseURL)
+	logx.Debug("Creating SSE MCP client: baseURL=%s headers=%v", cfg.BaseURL, cfg.Headers)
 
 	// 创建 SSE 客户端
 	c, err := client.NewSSEMCPClient(cfg.BaseURL, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sse client: %w", err)
 	}
+
+	// 等待 SSE 连接建立
+	// SSE 客户端需要一些时间来建立连接
+	time.Sleep(1 * time.Second)
+
+	logx.Debug("SSE client created, session_id: %s", c.GetSessionId())
 
 	return c, nil
 }
@@ -167,13 +173,18 @@ func (m *Manager) createStreamableHttpClient(cfg *config.MCPServerConfig) (*clie
 		opts = append(opts, transport.WithHTTPHeaders(cfg.Headers))
 	}
 
-	logx.Debug("Creating Streamable HTTP MCP client: baseURL=%s", cfg.BaseURL)
+	logx.Debug("Creating Streamable HTTP MCP client: baseURL=%s headers=%v", cfg.BaseURL, cfg.Headers)
 
 	// 创建 Streamable HTTP 客户端
 	c, err := client.NewStreamableHttpClient(cfg.BaseURL, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create streamable http client: %w", err)
 	}
+
+	// 等待连接建立
+	time.Sleep(1 * time.Second)
+
+	logx.Debug("Streamable HTTP client created, session_id: %s", c.GetSessionId())
 
 	return c, nil
 }

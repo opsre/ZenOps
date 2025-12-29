@@ -1,9 +1,12 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
 	"github.com/eryajf/zenops/internal/mcpclient"
@@ -26,6 +29,126 @@ func GetGlobalMCPManager() *mcpclient.Manager {
 // SetGlobalMCPManager 设置全局 MCP 客户端管理器
 func SetGlobalMCPManager(m *mcpclient.Manager) {
 	globalMCPManager = m
+}
+
+// parseHeaderString 解析旧格式的 header 字符串
+// 将 "Authorization=Bearer xxx" 转换为 {"Authorization": "Bearer xxx"}
+func parseHeaderString(headerStr string) map[string]string {
+	headers := make(map[string]string)
+	lines := strings.Split(headerStr, "\n")
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		// 查找第一个 = 号
+		firstEquals := strings.Index(trimmed, "=")
+		if firstEquals > 0 {
+			key := strings.TrimSpace(trimmed[:firstEquals])
+			value := strings.TrimSpace(trimmed[firstEquals+1:])
+			if key != "" {
+				headers[key] = value
+			}
+		}
+	}
+
+	return headers
+}
+
+// InitializeMCPServersFromDB 从数据库加载并连接已启用的 MCP 服务器
+func InitializeMCPServersFromDB(ctx context.Context, manager *mcpclient.Manager) error {
+	configService := service.NewConfigService()
+
+	// 获取所有 MCP 服务器
+	servers, err := configService.ListMCPServers()
+	if err != nil {
+		return fmt.Errorf("failed to list MCP servers from database: %w", err)
+	}
+
+	logx.Info("📦 Found %d MCP servers in database", len(servers))
+
+	connectedCount := 0
+	for _, server := range servers {
+		// 只连接已启用的服务器
+		if !server.IsActive {
+			logx.Debug("⏭️  Skipping disabled MCP server: %s", server.Name)
+			continue
+		}
+
+		logx.Info("🔗 Connecting to MCP server: %s (type: %s)", server.Name, server.Type)
+
+		// 转换 Headers map[string]interface{} 为 map[string]string
+		headers := make(map[string]string)
+		if server.Headers != nil {
+			// 检查是否是旧格式的 headers（包含 "custom" 键）
+			if customHeader, ok := server.Headers["custom"]; ok {
+				logx.Info("Detected old header format with 'custom' key for server %s, transforming...", server.Name)
+				// 解析旧格式的 header 字符串
+				if customHeaderStr, isString := customHeader.(string); isString {
+					headers = parseHeaderString(customHeaderStr)
+					logx.Info("Transformed headers for server %s: %v", server.Name, headers)
+
+					// 更新数据库中的 headers 为新格式
+					server.Headers = make(map[string]interface{})
+					for k, v := range headers {
+						server.Headers[k] = v
+					}
+					if err := configService.UpdateMCPServer(&server); err != nil {
+						logx.Warn("Failed to update server %s headers format in database: %v", server.Name, err)
+					} else {
+						logx.Info("Successfully updated server %s headers format in database", server.Name)
+					}
+				}
+			} else {
+				// 正常格式，直接转换
+				for k, v := range server.Headers {
+					if strVal, ok := v.(string); ok {
+						headers[k] = strVal
+					}
+				}
+			}
+		}
+
+		// 转换 Env map[string]interface{} 为 map[string]string
+		env := make(map[string]string)
+		if server.Env != nil {
+			for k, v := range server.Env {
+				if strVal, ok := v.(string); ok {
+					env[k] = strVal
+				}
+			}
+		}
+
+		// 使用 RegisterFromDB 方法注册服务器
+		err := manager.RegisterFromDB(
+			server.Name,
+			server.Type,
+			server.Command,
+			server.Args,
+			env,
+			server.BaseURL,
+			headers,
+			server.Timeout,
+		)
+
+		if err != nil {
+			logx.Error("❌ Failed to connect to MCP server %s: %v", server.Name, err)
+			// 更新服务器状态为错误
+			server.IsActive = false
+			if updateErr := configService.UpdateMCPServer(&server); updateErr != nil {
+				logx.Error("Failed to update server status: %v", updateErr)
+			}
+			continue
+		}
+
+		connectedCount++
+		logx.Info("✅ Successfully connected to MCP server: %s", server.Name)
+	}
+
+	logx.Info("🎉 Initialized %d/%d active MCP servers from database", connectedCount, len(servers))
+	return nil
 }
 
 // ConfigHandler 配置管理处理器
@@ -739,24 +862,52 @@ func (h *ConfigHandler) ToggleMCPServer(c *gin.Context) {
 	// 根据启用/禁用状态执行连接/断开操作
 	if req.IsActive {
 		// 启用：尝试连接 MCP 服务器
-		if !mcpManager.IsRegistered(name) {
-			// 转换 env 和 headers
-			env := make(map[string]string)
-			if server.Env != nil {
-				for k, v := range server.Env {
-					// 尝试多种类型转换
-					switch val := v.(type) {
-					case string:
-						env[k] = val
-					case fmt.Stringer:
-						env[k] = val.String()
-					default:
-						env[k] = fmt.Sprintf("%v", val)
-					}
+		// 如果已经注册，先注销再重新注册，确保状态一致
+		if mcpManager.IsRegistered(name) {
+			logx.Info("MCP server %s already registered, unregistering first", name)
+			if err := mcpManager.Unregister(name); err != nil {
+				logx.Warn("Failed to unregister existing MCP server %s: %v", name, err)
+			}
+		}
+
+		// 转换 env 和 headers
+		env := make(map[string]string)
+		if server.Env != nil {
+			for k, v := range server.Env {
+				// 尝试多种类型转换
+				switch val := v.(type) {
+				case string:
+					env[k] = val
+				case fmt.Stringer:
+					env[k] = val.String()
+				default:
+					env[k] = fmt.Sprintf("%v", val)
 				}
 			}
-			headers := make(map[string]string)
-			if server.Headers != nil {
+		}
+		headers := make(map[string]string)
+		if server.Headers != nil {
+			// 检查是否是旧格式的 headers（包含 "custom" 键）
+			if customHeader, ok := server.Headers["custom"]; ok {
+				logx.Info("Detected old header format with 'custom' key, transforming...")
+				// 解析旧格式的 header 字符串
+				if customHeaderStr, isString := customHeader.(string); isString {
+					headers = parseHeaderString(customHeaderStr)
+					logx.Info("Transformed headers: %v", headers)
+
+					// 更新数据库中的 headers 为新格式
+					server.Headers = make(map[string]interface{})
+					for k, v := range headers {
+						server.Headers[k] = v
+					}
+					if err := h.configService.UpdateMCPServer(server); err != nil {
+						logx.Warn("Failed to update server headers format in database: %v", err)
+					} else {
+						logx.Info("Successfully updated server headers format in database")
+					}
+				}
+			} else {
+				// 正常格式，直接转换
 				for k, v := range server.Headers {
 					// 尝试多种类型转换
 					switch val := v.(type) {
@@ -769,61 +920,64 @@ func (h *ConfigHandler) ToggleMCPServer(c *gin.Context) {
 					}
 				}
 			}
+		}
 
-			// 注册并连接 MCP 客户端
-			logx.Info("Attempting to register MCP server: %s (type: %s, command: %s, args: %v)",
-				name, server.Type, server.Command, server.Args)
+		// 注册并连接 MCP 客户端
+		logx.Info("Attempting to register MCP server: %s (type: %s, command: %s, args: %v)",
+			name, server.Type, server.Command, server.Args)
 
-			if err := mcpManager.RegisterFromDB(
-				name,
-				server.Type,
-				server.Command,
-				server.Args,
-				env,
-				server.BaseURL,
-				headers,
-				server.Timeout,
-			); err != nil {
-				logx.Error("Failed to register MCP server %s: %v", name, err)
-				c.JSON(http.StatusInternalServerError, Response{
-					Code:    500,
-					Message: fmt.Sprintf("Failed to connect MCP server: %v", err),
-				})
-				return
+		if err := mcpManager.RegisterFromDB(
+			name,
+			server.Type,
+			server.Command,
+			server.Args,
+			env,
+			server.BaseURL,
+			headers,
+			server.Timeout,
+		); err != nil {
+			logx.Error("Failed to register MCP server %s: %v", name, err)
+			c.JSON(http.StatusInternalServerError, Response{
+				Code:    500,
+				Message: fmt.Sprintf("Failed to connect MCP server: %v", err),
+			})
+			return
+		}
+
+		// 连接成功后，获取并保存工具列表到数据库
+		mcpClient, err := mcpManager.Get(name)
+		if err == nil && mcpClient != nil {
+			// 先删除该服务器的旧工具（避免重复）
+			logx.Info("Deleting old tools for server %s (ID: %d)", name, server.ID)
+			if err := h.configService.DeleteMCPToolsByServerID(server.ID); err != nil {
+				logx.Warn("Failed to delete old tools for server %s: %v", name, err)
 			}
 
-			// 连接成功后，获取并保存工具列表到数据库
-			mcpClient, err := mcpManager.Get(name)
-			if err == nil && mcpClient != nil {
-				// 先删除该服务器的旧工具
-				if err := h.configService.DeleteMCPToolsByServerID(server.ID); err != nil {
-					fmt.Printf("Warning: Failed to delete old tools for server %s: %v\n", name, err)
+			// 保存新的工具列表
+			logx.Info("Saving %d tools for server %s", len(mcpClient.Tools), name)
+			for _, tool := range mcpClient.Tools {
+				// 转换 InputSchema
+				inputSchema := make(map[string]interface{})
+				if tool.InputSchema.Type != "" {
+					inputSchema["type"] = tool.InputSchema.Type
+				}
+				if tool.InputSchema.Properties != nil {
+					inputSchema["properties"] = tool.InputSchema.Properties
+				}
+				if tool.InputSchema.Required != nil {
+					inputSchema["required"] = tool.InputSchema.Required
 				}
 
-				// 保存新的工具列表
-				for _, tool := range mcpClient.Tools {
-					// 转换 InputSchema
-					inputSchema := make(map[string]interface{})
-					if tool.InputSchema.Type != "" {
-						inputSchema["type"] = tool.InputSchema.Type
-					}
-					if tool.InputSchema.Properties != nil {
-						inputSchema["properties"] = tool.InputSchema.Properties
-					}
-					if tool.InputSchema.Required != nil {
-						inputSchema["required"] = tool.InputSchema.Required
-					}
-
-					mcpTool := model.MCPTool{
-						ServerID:    server.ID,
-						Name:        tool.Name,
-						Description: tool.Description,
-						IsEnabled:   true,
-						InputSchema: inputSchema,
-					}
-					if err := h.configService.CreateMCPTool(&mcpTool); err != nil {
-						fmt.Printf("Warning: Failed to save tool %s for server %s: %v\n", tool.Name, name, err)
-					}
+				mcpTool := model.MCPTool{
+					ServerID:    server.ID,
+					Name:        tool.Name,
+					Description: tool.Description,
+					IsEnabled:   true,
+					InputSchema: inputSchema,
+				}
+				// 使用 UpsertMCPTool 而不是 CreateMCPTool，避免重复插入
+				if err := h.configService.UpsertMCPTool(&mcpTool); err != nil {
+					logx.Warn("Failed to save tool %s for server %s: %v", tool.Name, name, err)
 				}
 			}
 		}
@@ -892,8 +1046,80 @@ func (h *ConfigHandler) TestMCPTool(c *gin.Context) {
 	serverName := c.Param("name")
 	toolName := c.Param("toolName")
 
-	var args interface{}
-	if err := c.ShouldBindJSON(&args); err != nil {
+	var argsMap map[string]interface{}
+	if err := c.ShouldBindJSON(&argsMap); err != nil {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: fmt.Sprintf("Invalid request body: %v", err),
+		})
+		return
+	}
+
+	// 获取服务器信息
+	server, err := h.configService.GetMCPServerByName(serverName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, Response{
+			Code:    404,
+			Message: fmt.Sprintf("MCP server '%s' not found", serverName),
+		})
+		return
+	}
+
+	// 检查服务器是否启用
+	if !server.IsActive {
+		c.JSON(http.StatusBadRequest, Response{
+			Code:    400,
+			Message: fmt.Sprintf("MCP server '%s' is not active", serverName),
+		})
+		return
+	}
+
+	// 调用 MCP 工具
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	mcpManager := GetGlobalMCPManager()
+	startTime := time.Now()
+	result, err := mcpManager.CallTool(ctx, serverName, toolName, argsMap)
+	latency := time.Since(startTime).Milliseconds()
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: fmt.Sprintf("Failed to call tool: %v", err),
+			Data: gin.H{
+				"server_name": serverName,
+				"tool_name":   toolName,
+				"args":        argsMap,
+				"latency_ms":  latency,
+				"error":       err.Error(),
+			},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, Response{
+		Code:    200,
+		Message: "success",
+		Data: gin.H{
+			"server_name": serverName,
+			"tool_name":   toolName,
+			"args":        argsMap,
+			"latency_ms":  latency,
+			"result":      result,
+		},
+	})
+}
+
+// ToggleMCPTool 切换 MCP 工具的启用状态
+func (h *ConfigHandler) ToggleMCPTool(c *gin.Context) {
+	serverName := c.Param("name")
+	toolName := c.Param("toolName")
+
+	var req struct {
+		IsEnabled bool `json:"isEnabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, Response{
 			Code:    400,
 			Message: err.Error(),
@@ -901,23 +1127,46 @@ func (h *ConfigHandler) TestMCPTool(c *gin.Context) {
 		return
 	}
 
-	// TODO: 实现测试调用MCP工具的逻辑
-	// 这需要与MCP服务器实际通信
+	// 获取服务器
+	server, err := h.configService.GetMCPServerByName(serverName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, Response{
+			Code:    404,
+			Message: "MCP server not found",
+		})
+		return
+	}
+
+	// 查找并更新工具状态
+	var updatedTool *model.MCPTool
+	for i := range server.Tools {
+		if server.Tools[i].Name == toolName {
+			server.Tools[i].IsEnabled = req.IsEnabled
+			if err := h.configService.UpdateMCPTool(&server.Tools[i]); err != nil {
+				c.JSON(http.StatusInternalServerError, Response{
+					Code:    500,
+					Message: fmt.Sprintf("Failed to update tool status: %v", err),
+				})
+				return
+			}
+			updatedTool = &server.Tools[i]
+			break
+		}
+	}
+
+	if updatedTool == nil {
+		c.JSON(http.StatusNotFound, Response{
+			Code:    404,
+			Message: "Tool not found",
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, Response{
 		Code:    200,
 		Message: "success",
 		Data: gin.H{
-			"result": gin.H{
-				"server_name": serverName,
-				"tool_name":   toolName,
-				"args":        args,
-				"content": []gin.H{
-					{
-						"type": "text",
-						"text": "Tool test not implemented yet",
-					},
-				},
-			},
+			"tool": updatedTool,
 		},
 	})
 }

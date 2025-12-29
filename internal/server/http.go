@@ -218,6 +218,7 @@ func (s *HTTPGinServer) registerRoutes() {
 			mcp.DELETE("/servers/:name", configHandler.DeleteMCPServerByName)
 			mcp.PATCH("/servers/:name/toggle", configHandler.ToggleMCPServer)
 			mcp.GET("/servers/:name/tools", configHandler.GetMCPTools)
+			mcp.PATCH("/servers/:name/tools/:toolName/toggle", configHandler.ToggleMCPTool)
 			mcp.POST("/servers/:name/tools/:toolName/test", configHandler.TestMCPTool)
 			// MCP 调试接口
 			mcp.POST("/debug/execute", mcpHandler.DebugExecute)

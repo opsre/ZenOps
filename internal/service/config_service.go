@@ -1,7 +1,9 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -276,6 +278,34 @@ func (s *ConfigService) DeleteMCPServer(id uint) error {
 // CreateMCPTool 创建MCP工具
 func (s *ConfigService) CreateMCPTool(tool *model.MCPTool) error {
 	return s.db.Create(tool).Error
+}
+
+// UpsertMCPTool 创建或更新MCP工具（基于server_id + name唯一性）
+func (s *ConfigService) UpsertMCPTool(tool *model.MCPTool) error {
+	// 使用原生SQL实现真正的Upsert
+	// SQLite使用 INSERT ... ON CONFLICT ... DO UPDATE
+	inputSchemaJSON, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	if tool.CreatedAt.IsZero() {
+		tool.CreatedAt = now
+	}
+	tool.UpdatedAt = now
+
+	return s.db.Exec(`
+		INSERT INTO mcp_tools (server_id, name, description, isEnabled, inputSchema, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(server_id, name)
+		DO UPDATE SET
+			description = excluded.description,
+			isEnabled = excluded.isEnabled,
+			inputSchema = excluded.inputSchema,
+			updated_at = excluded.updated_at
+	`, tool.ServerID, tool.Name, tool.Description, tool.IsEnabled,
+		string(inputSchemaJSON), tool.CreatedAt, tool.UpdatedAt).Error
 }
 
 // DeleteMCPToolsByServerID 删除指定服务器的所有工具

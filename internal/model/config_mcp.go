@@ -8,7 +8,7 @@ import (
 type MCPServer struct {
 	ID            uint        `gorm:"primaryKey" json:"id"`
 	Name          string      `gorm:"size:100;not null;uniqueIndex" json:"name"`
-	IsActive      bool        `gorm:"default:true" json:"is_active"`
+	IsActive      bool        `gorm:"default:false" json:"is_active"`
 	Type          string      `gorm:"size:50;not null" json:"type"` // stdio, sse, streamableHttp
 	Description   string      `gorm:"type:text" json:"description"`
 	BaseURL       string      `gorm:"type:text" json:"base_url"`
