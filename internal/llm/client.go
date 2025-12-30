@@ -188,7 +188,7 @@ func (c *Client) ChatWithMCPTools(ctx context.Context, userMessage string) (<-ch
 			if len(resp.ToolCalls) > 0 {
 				// 处理工具调用
 				for _, toolCall := range resp.ToolCalls {
-					responseCh <- fmt.Sprintf("🔧 调用工具: %s\n", toolCall.Function.Name)
+					responseCh <- fmt.Sprintf("> 🔧 调用工具: %s\n", toolCall.Function.Name)
 
 					result, err := c.executeToolCall(ctx, toolCall)
 					if err != nil {

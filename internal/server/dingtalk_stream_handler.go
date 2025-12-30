@@ -12,6 +12,8 @@ import (
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/imcp"
 	"github.com/eryajf/zenops/internal/llm"
+	"github.com/eryajf/zenops/internal/model"
+	"github.com/eryajf/zenops/internal/service"
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
@@ -42,32 +44,56 @@ type intentPattern struct {
 
 // DingTalkStreamHandler Stream模式处理器
 type DingTalkStreamHandler struct {
-	config       *config.Config
-	cardClient   *DingTalkStreamClient
-	mcpServer    *imcp.MCPServer
-	streamClient *client.StreamClient
-	intentParser *IntentParser
-	llmClient    *llm.Client
+	config         *config.Config
+	cardClient     *DingTalkStreamClient
+	mcpServer      *imcp.MCPServer
+	streamClient   *client.StreamClient
+	intentParser   *IntentParser
+	llmClient      *llm.Client
+	chatLogService *service.ChatLogService
 }
 
 // NewDingTalkStreamHandler 创建Stream处理器
 func NewDingTalkStreamHandler(cfg *config.Config, cardClient *DingTalkStreamClient, mcpServer *imcp.MCPServer) *DingTalkStreamHandler {
 	handler := &DingTalkStreamHandler{
-		config:       cfg,
-		cardClient:   cardClient,
-		mcpServer:    mcpServer,
-		intentParser: newIntentParser(),
+		config:         cfg,
+		cardClient:     cardClient,
+		mcpServer:      mcpServer,
+		intentParser:   newIntentParser(),
+		chatLogService: service.NewChatLogService(),
 	}
 
 	// 初始化 LLM 客户端
-	if cfg.LLM.Enabled {
-		llmCfg := &llm.Config{
+	// 优先从数据库读取 LLM 配置，如果数据库没有配置则使用 config.yaml
+	configService := service.NewConfigService()
+	dbLLMConfig, err := configService.GetDefaultLLMConfig()
+
+	var llmEnabled bool
+	var llmCfg *llm.Config
+
+	if err == nil && dbLLMConfig != nil && dbLLMConfig.Enabled {
+		// 使用数据库配置
+		llmEnabled = true
+		llmCfg = &llm.Config{
+			Model:   dbLLMConfig.Model,
+			APIKey:  dbLLMConfig.APIKey,
+			BaseURL: dbLLMConfig.BaseURL,
+		}
+		logx.Info("⚗️ Using LLM Config from Database: %s (Model: %s)", dbLLMConfig.Name, dbLLMConfig.Model)
+	} else if cfg.LLM.Enabled {
+		// 降级使用 config.yaml 配置
+		llmEnabled = true
+		llmCfg = &llm.Config{
 			Model:   cfg.LLM.Model,
 			APIKey:  cfg.LLM.APIKey,
 			BaseURL: cfg.LLM.BaseURL,
 		}
+		logx.Info("⚗️ Using LLM Config from config.yaml (Model: %s)", cfg.LLM.Model)
+	}
+
+	if llmEnabled {
 		handler.llmClient = llm.NewClient(llmCfg, mcpServer)
-		logx.Info("⚗️ LLM Client Initialized For DingTalk Stream Handler, Model %s", cfg.LLM.Model)
+		logx.Info("⚗️ LLM Client Initialized For DingTalk Stream Handler")
 	}
 
 	return handler
@@ -153,11 +179,34 @@ func (h *DingTalkStreamHandler) cleanAtMention(content, chatbotUserID string, at
 func (h *DingTalkStreamHandler) sendHelpMessage(ctx context.Context, data *chatbot.BotCallbackDataModel) {
 	helpContent := getHelpMessage()
 
+	// 确定消息来源（私聊/群聊）
+	source := "私聊"
+	if data.ConversationType == "2" {
+		source = "群聊"
+	}
+
+	// 保存用户消息到数据库
+	username := data.SenderNick
+	if username == "" {
+		username = data.SenderStaffId
+	}
+	userLog, err := h.chatLogService.CreateUserMessage(username, source, "帮助")
+	if err != nil {
+		logx.Error("Failed to save user message to database: %v", err)
+	}
+
 	// 检查是否配置了卡片模板ID
 	if h.config.DingTalk.CardTemplateID == "" {
 		// 使用传统文本回复
 		logx.Debug("Card template not configured, using text reply")
 		h.sendTextReply(data, helpContent)
+		// 保存帮助消息到数据库
+		if userLog != nil {
+			_, saveErr := h.chatLogService.CreateAIMessage(username, source, helpContent, userLog.ID)
+			if saveErr != nil {
+				logx.Error("Failed to save help message to database: %v", saveErr)
+			}
+		}
 		return
 	}
 
@@ -167,10 +216,25 @@ func (h *DingTalkStreamHandler) sendHelpMessage(ctx context.Context, data *chatb
 	if err := h.createCard(ctx, trackID, data); err != nil {
 		logx.Error("Failed to create help card, fallback to text: %v", err)
 		h.sendTextReply(data, helpContent)
+		// 保存帮助消息到数据库
+		if userLog != nil {
+			_, saveErr := h.chatLogService.CreateAIMessage(username, source, helpContent, userLog.ID)
+			if saveErr != nil {
+				logx.Error("Failed to save help message to database: %v", saveErr)
+			}
+		}
 		return
 	}
 
 	_ = h.cardClient.StreamingUpdate(trackID, helpContent, true)
+
+	// 保存帮助消息到数据库
+	if userLog != nil {
+		_, err := h.chatLogService.CreateAIMessage(username, source, helpContent, userLog.ID)
+		if err != nil {
+			logx.Error("Failed to save help message to database: %v", err)
+		}
+	}
 }
 
 // sendErrorMessage 发送错误消息
@@ -702,6 +766,22 @@ func (h *DingTalkStreamHandler) sendTextReply(data *chatbot.BotCallbackDataModel
 func (h *DingTalkStreamHandler) processLLMMessage(ctx context.Context, data *chatbot.BotCallbackDataModel, userMessage string) {
 	logx.Info("Processing message with LLM, user %s asked: %s", data.SenderNick, userMessage)
 
+	// 确定消息来源（私聊/群聊）
+	source := "私聊"
+	if data.ConversationType == "2" {
+		source = "群聊"
+	}
+
+	// 保存用户消息到数据库
+	username := data.SenderNick
+	if username == "" {
+		username = data.SenderStaffId
+	}
+	userLog, err := h.chatLogService.CreateUserMessage(username, source, userMessage)
+	if err != nil {
+		logx.Error("Failed to save user message to database: %v", err)
+	}
+
 	// 检查是否使用卡片
 	useCard := h.config.DingTalk.CardTemplateID != ""
 	var trackID string
@@ -741,16 +821,19 @@ func (h *DingTalkStreamHandler) processLLMMessage(ctx context.Context, data *cha
 
 	// 流式接收响应
 	if useCard {
-		h.streamLLMResponseWithCard(ctx, trackID, userMessage, responseCh)
+		h.streamLLMResponseWithCard(ctx, trackID, userMessage, username, source, userLog, responseCh)
 	} else {
-		h.streamLLMResponseWithText(data, userMessage, responseCh)
+		h.streamLLMResponseWithText(data, userMessage, username, source, userLog, responseCh)
 	}
 }
 
 // streamLLMResponseWithCard 使用卡片流式显示 LLM 响应
-func (h *DingTalkStreamHandler) streamLLMResponseWithCard(ctx context.Context, trackID, question string, responseCh <-chan string) {
+func (h *DingTalkStreamHandler) streamLLMResponseWithCard(ctx context.Context, trackID, question, username, source string, userLog *model.ChatLog, responseCh <-chan string) {
 	questionHeader := fmt.Sprintf("**%s**\n\n", question)
 	fullContent := questionHeader
+
+	// 用于收集AI响应（不包含header）
+	var aiResponse strings.Builder
 
 	// 改进的缓冲机制
 	updateBuffer := ""
@@ -767,12 +850,22 @@ func (h *DingTalkStreamHandler) streamLLMResponseWithCard(ctx context.Context, t
 				// 流结束,发送最终更新
 				if updateBuffer != "" {
 					fullContent += updateBuffer
+					aiResponse.WriteString(updateBuffer)
 				}
 				fullContent += fmt.Sprintf("\n\n---\n⏰ %s", time.Now().Format("2006-01-02 15:04:05"))
 
 				if err := h.cardClient.StreamingUpdate(trackID, fullContent, true); err != nil {
 					logx.Error("Failed to finalize card: %v", err)
 				}
+
+				// 保存AI响应到数据库
+				if userLog != nil && aiResponse.Len() > 0 {
+					_, err := h.chatLogService.CreateAIMessage(username, source, aiResponse.String(), userLog.ID)
+					if err != nil {
+						logx.Error("Failed to save AI response to database: %v", err)
+					}
+				}
+
 				logx.Info("LLM conversation completed with card")
 				return
 			}
@@ -784,6 +877,7 @@ func (h *DingTalkStreamHandler) streamLLMResponseWithCard(ctx context.Context, t
 			// 定时检查是否需要更新
 			if updateBuffer != "" && len(updateBuffer) >= minBufferSize {
 				fullContent += updateBuffer
+				aiResponse.WriteString(updateBuffer)
 				updateBuffer = ""
 
 				// 更新卡片
@@ -796,7 +890,7 @@ func (h *DingTalkStreamHandler) streamLLMResponseWithCard(ctx context.Context, t
 }
 
 // streamLLMResponseWithText 使用文本消息显示 LLM 响应
-func (h *DingTalkStreamHandler) streamLLMResponseWithText(data *chatbot.BotCallbackDataModel, question string, responseCh <-chan string) {
+func (h *DingTalkStreamHandler) streamLLMResponseWithText(data *chatbot.BotCallbackDataModel, question, username, source string, userLog *model.ChatLog, responseCh <-chan string) {
 	// 累积所有响应
 	var fullResponse strings.Builder
 
@@ -804,12 +898,23 @@ func (h *DingTalkStreamHandler) streamLLMResponseWithText(data *chatbot.BotCallb
 		fullResponse.WriteString(content)
 	}
 
+	aiResponseStr := fullResponse.String()
+
 	// 格式化并发送完整响应
 	result := fmt.Sprintf("**问题:** %s\n\n**回答:**\n\n%s\n\n---\n⏰ %s",
 		question,
-		fullResponse.String(),
+		aiResponseStr,
 		time.Now().Format("2006-01-02 15:04:05"))
 
 	h.sendTextReply(data, result)
+
+	// 保存AI响应到数据库
+	if userLog != nil && aiResponseStr != "" {
+		_, err := h.chatLogService.CreateAIMessage(username, source, aiResponseStr, userLog.ID)
+		if err != nil {
+			logx.Error("Failed to save AI response to database: %v", err)
+		}
+	}
+
 	logx.Info("LLM conversation completed with text")
 }

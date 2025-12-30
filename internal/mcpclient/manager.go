@@ -154,11 +154,18 @@ func (m *Manager) createSSEClient(cfg *config.MCPServerConfig) (*client.Client, 
 		return nil, fmt.Errorf("failed to create sse client: %w", err)
 	}
 
-	// 等待 SSE 连接建立
-	// SSE 客户端需要一些时间来建立连接
-	time.Sleep(1 * time.Second)
+	// 启动 SSE 传输（关键步骤！）
+	logx.Info("🚀 Starting SSE transport...")
 
-	logx.Debug("SSE client created, session_id: %s", c.GetSessionId())
+	if err = c.Start(context.Background()); err != nil {
+		c.Close()
+		return nil, fmt.Errorf("failed to start SSE transport: %w", err)
+	}
+
+	// Start() 是异步的，等待一小段时间让 SSE 连接建立
+	time.Sleep(500 * time.Millisecond)
+
+	logx.Info("✅ SSE transport started successfully, session_id: %s", c.GetSessionId())
 
 	return c, nil
 }
@@ -191,6 +198,9 @@ func (m *Manager) createStreamableHttpClient(cfg *config.MCPServerConfig) (*clie
 
 // initializeClient 初始化客户端
 func (m *Manager) initializeClient(ctx context.Context, c *client.Client) error {
+	logx.Info("📡 Sending initialize request to MCP server...")
+	logx.Debug("   Session ID: %s", c.GetSessionId())
+
 	initReq := mcp.InitializeRequest{}
 	initReq.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
 	initReq.Params.ClientInfo = mcp.Implementation{
@@ -199,21 +209,46 @@ func (m *Manager) initializeClient(ctx context.Context, c *client.Client) error 
 	}
 	initReq.Params.Capabilities = mcp.ClientCapabilities{}
 
-	_, err := c.Initialize(ctx, initReq)
+	logx.Debug("   Protocol Version: %s", initReq.Params.ProtocolVersion)
+
+	resp, err := c.Initialize(ctx, initReq)
 	if err != nil {
+		logx.Error("❌ Initialize request failed: %v", err)
 		return fmt.Errorf("failed to initialize: %w", err)
 	}
+
+	if resp == nil {
+		logx.Error("❌ Initialize response is nil")
+		return fmt.Errorf("initialize response is nil")
+	}
+
+	logx.Info("✅ Initialize response received: serverInfo=%+v, protocolVersion=%s",
+		resp.ServerInfo, resp.ProtocolVersion)
 
 	return nil
 }
 
 // listTools 获取工具列表
 func (m *Manager) listTools(ctx context.Context, c *client.Client) ([]mcp.Tool, error) {
+	logx.Info("📋 Requesting tool list from MCP server...")
+
 	toolsReq := mcp.ListToolsRequest{}
 	result, err := c.ListTools(ctx, toolsReq)
 	if err != nil {
+		logx.Error("❌ Failed to list tools: %v", err)
 		return nil, fmt.Errorf("failed to list tools: %w", err)
 	}
+
+	if result == nil {
+		logx.Warn("⚠️  ListTools response is nil")
+		return []mcp.Tool{}, nil
+	}
+
+	logx.Info("✅ Received %d tools from MCP server", len(result.Tools))
+	for i, tool := range result.Tools {
+		logx.Debug("   Tool %d: %s - %s", i+1, tool.Name, tool.Description)
+	}
+
 	return result.Tools, nil
 }
 
@@ -290,17 +325,19 @@ func (m *Manager) CloseAll() {
 }
 
 // RegisterFromDB 从数据库模型注册 MCP 客户端
-func (m *Manager) RegisterFromDB(name string, serverType string, command string, args []string, env map[string]string, baseURL string, headers map[string]string, timeout int) error {
+func (m *Manager) RegisterFromDB(name string, serverType string, command string, args []string, env map[string]string, baseURL string, headers map[string]string, timeout int, toolPrefix string, autoRegister bool) error {
 	// 创建配置
 	cfg := &config.MCPServerConfig{
-		Type:     serverType,
-		Command:  command,
-		Args:     args,
-		Env:      env,
-		BaseURL:  baseURL,
-		Headers:  headers,
-		Timeout:  timeout,
-		IsActive: true,
+		Type:         serverType,
+		Command:      command,
+		Args:         args,
+		Env:          env,
+		BaseURL:      baseURL,
+		Headers:      headers,
+		Timeout:      timeout,
+		IsActive:     true,
+		ToolPrefix:   toolPrefix,
+		AutoRegister: autoRegister,
 	}
 
 	return m.Register(name, cfg)

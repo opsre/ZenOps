@@ -10,18 +10,20 @@ import (
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/imcp"
 	"github.com/eryajf/zenops/internal/llm"
+	"github.com/eryajf/zenops/internal/service"
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // MessageHandler 消息处理器
 type MessageHandler struct {
-	client    *Client
-	parser    *IntentParser
-	mcpServer *imcp.MCPServer
-	config    *config.Config
-	streamMgr *StreamManager
-	llmClient *llm.Client
+	client         *Client
+	parser         *IntentParser
+	mcpServer      *imcp.MCPServer
+	config         *config.Config
+	streamMgr      *StreamManager
+	llmClient      *llm.Client
+	chatLogService *service.ChatLogService
 }
 
 // // NewMessageHandler 创建消息处理器

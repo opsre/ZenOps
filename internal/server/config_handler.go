@@ -131,6 +131,8 @@ func InitializeMCPServersFromDB(ctx context.Context, manager *mcpclient.Manager)
 			server.BaseURL,
 			headers,
 			server.Timeout,
+			server.ToolPrefix,
+			server.AutoRegister,
 		)
 
 		if err != nil {
@@ -935,6 +937,8 @@ func (h *ConfigHandler) ToggleMCPServer(c *gin.Context) {
 			server.BaseURL,
 			headers,
 			server.Timeout,
+			server.ToolPrefix,
+			server.AutoRegister,
 		); err != nil {
 			logx.Error("Failed to register MCP server %s: %v", name, err)
 			c.JSON(http.StatusInternalServerError, Response{
@@ -1055,6 +1059,21 @@ func (h *ConfigHandler) TestMCPTool(c *gin.Context) {
 		return
 	}
 
+	// 清理参数：移除空字符串和 nil 值
+	// 空字符串通常表示用户没有填写该字段，不应该传递给 MCP 工具
+	cleanedArgs := make(map[string]interface{})
+	for key, value := range argsMap {
+		// 跳过空字符串
+		if strVal, ok := value.(string); ok && strVal == "" {
+			continue
+		}
+		// 跳过 nil 值
+		if value == nil {
+			continue
+		}
+		cleanedArgs[key] = value
+	}
+
 	// 获取服务器信息
 	server, err := h.configService.GetMCPServerByName(serverName)
 	if err != nil {
@@ -1080,7 +1099,7 @@ func (h *ConfigHandler) TestMCPTool(c *gin.Context) {
 
 	mcpManager := GetGlobalMCPManager()
 	startTime := time.Now()
-	result, err := mcpManager.CallTool(ctx, serverName, toolName, argsMap)
+	result, err := mcpManager.CallTool(ctx, serverName, toolName, cleanedArgs)
 	latency := time.Since(startTime).Milliseconds()
 
 	if err != nil {
@@ -1090,7 +1109,7 @@ func (h *ConfigHandler) TestMCPTool(c *gin.Context) {
 			Data: gin.H{
 				"server_name": serverName,
 				"tool_name":   toolName,
-				"args":        argsMap,
+				"args":        cleanedArgs,
 				"latency_ms":  latency,
 				"error":       err.Error(),
 			},
@@ -1104,7 +1123,7 @@ func (h *ConfigHandler) TestMCPTool(c *gin.Context) {
 		Data: gin.H{
 			"server_name": serverName,
 			"tool_name":   toolName,
-			"args":        argsMap,
+			"args":        cleanedArgs,
 			"latency_ms":  latency,
 			"result":      result,
 		},

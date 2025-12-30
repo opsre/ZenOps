@@ -11,6 +11,8 @@ import (
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/imcp"
 	"github.com/eryajf/zenops/internal/llm"
+	"github.com/eryajf/zenops/internal/model"
+	"github.com/eryajf/zenops/internal/service"
 	"github.com/google/uuid"
 )
 
@@ -30,6 +32,7 @@ type MessageHandler struct {
 	Client              *AIBotClient // 导出以便外部访问
 	mcpServer           *imcp.MCPServer
 	llmClient           *llm.Client
+	chatLogService      *service.ChatLogService
 	conversationManager sync.Map // 存储对话状态
 	msgIDCache          sync.Map // 消息ID缓存,用于去重
 }
@@ -54,10 +57,11 @@ func NewMessageHandler(cfg *config.Config, mcpServer *imcp.MCPServer) (*MessageH
 	}
 
 	handler := &MessageHandler{
-		config:    cfg,
-		Client:    client,
-		mcpServer: mcpServer,
-		llmClient: llmClient,
+		config:         cfg,
+		Client:         client,
+		mcpServer:      mcpServer,
+		llmClient:      llmClient,
+		chatLogService: service.NewChatLogService(),
 	}
 
 	// 启动消息缓存清理协程
@@ -137,15 +141,27 @@ func (h *MessageHandler) processMessage(ctx context.Context, req *UserReq, conve
 
 	logx.Info("Processing message from Wecom: user %s, message %s", req.From.Userid, userMessage)
 
+	// 确定消息来源（私聊/群聊）
+	source := "私聊"
+	if req.Chattype != "" && req.Chattype != "single" {
+		source = "群聊"
+	}
+
+	// 保存用户消息到数据库
+	userLog, err := h.chatLogService.CreateUserMessage(req.From.Userid, source, userMessage)
+	if err != nil {
+		logx.Error("Failed to save user message to database: %v", err)
+	}
+
 	// 特殊命令处理
 	if strings.Contains(userMessage, "帮助") || strings.Contains(userMessage, "help") {
-		h.sendHelpMessage(state)
+		h.sendHelpMessage(state, req.From.Userid, source, userLog)
 		return
 	}
 
 	// 如果启用了 LLM,使用 LLM 处理
 	if h.config.LLM.Enabled && h.llmClient != nil {
-		h.processLLMMessage(ctx, userMessage, state)
+		h.processLLMMessage(ctx, userMessage, state, req.From.Userid, source, userLog)
 		return
 	}
 
@@ -158,7 +174,7 @@ func (h *MessageHandler) processMessage(ctx context.Context, req *UserReq, conve
 }
 
 // processLLMMessage 使用 LLM 处理消息
-func (h *MessageHandler) processLLMMessage(ctx context.Context, userMessage string, state *ConversationState) {
+func (h *MessageHandler) processLLMMessage(ctx context.Context, userMessage string, state *ConversationState, username, source string, userLog *model.ChatLog) {
 	// 调用 LLM 流式对话
 	responseCh, err := h.llmClient.ChatWithToolsAndStream(ctx, userMessage)
 	if err != nil {
@@ -170,10 +186,14 @@ func (h *MessageHandler) processLLMMessage(ctx context.Context, userMessage stri
 		return
 	}
 
+	// 用于收集完整的AI响应
+	var aiResponse strings.Builder
+
 	// 流式接收并缓存响应
 	for event := range responseCh {
 		state.Mutex.Lock()
 		state.Buffer.WriteString(event)
+		aiResponse.WriteString(event)
 		if state.IsVisited {
 			select {
 			case state.NotificationChan <- event:
@@ -181,6 +201,16 @@ func (h *MessageHandler) processLLMMessage(ctx context.Context, userMessage stri
 			}
 		}
 		state.Mutex.Unlock()
+	}
+
+	// 保存AI响应到数据库
+	if userLog != nil && aiResponse.Len() > 0 {
+		var parentID uint
+		parentID = userLog.ID
+		_, err := h.chatLogService.CreateAIMessage(username, source, aiResponse.String(), parentID)
+		if err != nil {
+			logx.Error("Failed to save AI response to database: %v", err)
+		}
 	}
 
 	// 标记完成
@@ -193,12 +223,20 @@ func (h *MessageHandler) processLLMMessage(ctx context.Context, userMessage stri
 }
 
 // sendHelpMessage 发送帮助消息
-func (h *MessageHandler) sendHelpMessage(state *ConversationState) {
+func (h *MessageHandler) sendHelpMessage(state *ConversationState, username, source string, userLog *model.ChatLog) {
 	helpText := GetHelpMessage()
 	state.Mutex.Lock()
 	state.Buffer.WriteString(helpText)
 	state.IsDone = true
 	state.Mutex.Unlock()
+
+	// 保存帮助消息到数据库
+	if userLog != nil {
+		_, err := h.chatLogService.CreateAIMessage(username, source, helpText, userLog.ID)
+		if err != nil {
+			logx.Error("Failed to save help message to database: %v", err)
+		}
+	}
 }
 
 // startMessageCleanup 启动消息缓存清理协程

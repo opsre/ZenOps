@@ -11,16 +11,19 @@ import (
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/imcp"
 	"github.com/eryajf/zenops/internal/llm"
+	"github.com/eryajf/zenops/internal/model"
+	"github.com/eryajf/zenops/internal/service"
 	larkcontact "github.com/larksuite/oapi-sdk-go/v3/service/contact/v3"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
 
 // MessageHandler 飞书消息处理器
 type MessageHandler struct {
-	client    *Client
-	config    *config.Config
-	mcpServer *imcp.MCPServer
-	llmClient *llm.Client
+	client         *Client
+	config         *config.Config
+	mcpServer      *imcp.MCPServer
+	llmClient      *llm.Client
+	chatLogService *service.ChatLogService
 }
 
 // NewMessageHandler 创建消息处理器
@@ -28,22 +31,45 @@ func NewMessageHandler(cfg *config.Config, mcpServer *imcp.MCPServer) (*MessageH
 	client := NewClient(cfg.Feishu.AppID, cfg.Feishu.AppSecret)
 
 	// 初始化 LLM 客户端
+	// 优先从数据库读取 LLM 配置，如果数据库没有配置则使用 config.yaml
 	var llmClient *llm.Client
-	if cfg.LLM.Enabled {
-		llmConfig := &llm.Config{
+	configService := service.NewConfigService()
+	dbLLMConfig, err := configService.GetDefaultLLMConfig()
+
+	var llmEnabled bool
+	var llmConfig *llm.Config
+
+	if err == nil && dbLLMConfig != nil && dbLLMConfig.Enabled {
+		// 使用数据库配置
+		llmEnabled = true
+		llmConfig = &llm.Config{
+			Model:   dbLLMConfig.Model,
+			APIKey:  dbLLMConfig.APIKey,
+			BaseURL: dbLLMConfig.BaseURL,
+		}
+		logx.Info("⚗️ Using LLM Config from Database: %s (Model: %s)", dbLLMConfig.Name, dbLLMConfig.Model)
+	} else if cfg.LLM.Enabled {
+		// 降级使用 config.yaml 配置
+		llmEnabled = true
+		llmConfig = &llm.Config{
 			Model:   cfg.LLM.Model,
 			APIKey:  cfg.LLM.APIKey,
 			BaseURL: cfg.LLM.BaseURL,
 		}
+		logx.Info("⚗️ Using LLM Config from config.yaml (Model: %s)", cfg.LLM.Model)
+	}
+
+	if llmEnabled {
 		llmClient = llm.NewClient(llmConfig, mcpServer)
-		logx.Info("LLM client initialized for Feishu, model %s", cfg.LLM.Model)
+		logx.Info("⚗️ LLM Client Initialized For Feishu")
 	}
 
 	return &MessageHandler{
-		client:    client,
-		config:    cfg,
-		mcpServer: mcpServer,
-		llmClient: llmClient,
+		client:         client,
+		config:         cfg,
+		mcpServer:      mcpServer,
+		llmClient:      llmClient,
+		chatLogService: service.NewChatLogService(),
 	}, nil
 }
 
@@ -70,14 +96,27 @@ func (h *MessageHandler) HandleTextMessage(ctx context.Context, event *larkim.P2
 		*event.Event.Sender.SenderId.OpenId,
 		userMessage)
 
+	// 确定消息来源（私聊/群聊）
+	source := "私聊"
+	if *event.Event.Message.ChatType == "group" {
+		source = "群聊"
+	}
+
+	// 保存用户消息到数据库
+	username := *event.Event.Sender.SenderId.OpenId
+	userLog, err := h.chatLogService.CreateUserMessage(username, source, userMessage)
+	if err != nil {
+		logx.Error("Failed to save user message to database: %v", err)
+	}
+
 	// 特殊命令处理
 	if strings.Contains(userMessage, "帮助") || strings.Contains(userMessage, "help") {
-		return h.sendHelpMessage(ctx, event)
+		return h.sendHelpMessage(ctx, event, username, source, userLog)
 	}
 
 	// 如果启用了 LLM,使用 LLM 处理
 	if h.config.LLM.Enabled && h.llmClient != nil {
-		return h.processLLMMessage(ctx, event, userMessage)
+		return h.processLLMMessage(ctx, event, userMessage, username, source, userLog)
 	}
 
 	// 否则返回默认消息
@@ -93,7 +132,7 @@ func (h *MessageHandler) HandleTextMessage(ctx context.Context, event *larkim.P2
 }
 
 // processLLMMessage 使用 LLM 处理消息(流式卡片更新)
-func (h *MessageHandler) processLLMMessage(ctx context.Context, event *larkim.P2MessageReceiveV1, userMessage string) error {
+func (h *MessageHandler) processLLMMessage(ctx context.Context, event *larkim.P2MessageReceiveV1, userMessage, username, source string, userLog *model.ChatLog) error {
 	receiveIDType := "open_id"
 	receiveID := *event.Event.Sender.SenderId.OpenId
 	if *event.Event.Message.ChatType == "group" {
@@ -137,6 +176,9 @@ func (h *MessageHandler) processLLMMessage(ctx context.Context, event *larkim.P2
 	var fullResponse strings.Builder
 	fullResponse.WriteString(answerHeader)
 
+	// 用于收集AI响应（不包含header）
+	var aiResponse strings.Builder
+
 	updateTicker := time.NewTicker(300 * time.Millisecond) // 每 300ms 更新一次
 	defer updateTicker.Stop()
 
@@ -154,9 +196,19 @@ func (h *MessageHandler) processLLMMessage(ctx context.Context, event *larkim.P2
 				if err := h.client.UpdateCardElement(ctxWithTimestamp, cardID, "markdown_content", finalContent, sequence); err != nil {
 					logx.Error("Failed to send final update: %v", err)
 				}
+
+				// 保存AI响应到数据库
+				if userLog != nil && aiResponse.Len() > 0 {
+					_, err := h.chatLogService.CreateAIMessage(username, source, aiResponse.String(), userLog.ID)
+					if err != nil {
+						logx.Error("Failed to save AI response to database: %v", err)
+					}
+				}
+
 				return nil
 			}
 			fullResponse.WriteString(content)
+			aiResponse.WriteString(content)
 
 		case <-updateTicker.C:
 			// 定时更新卡片
@@ -177,7 +229,7 @@ func (h *MessageHandler) processLLMMessage(ctx context.Context, event *larkim.P2
 }
 
 // sendHelpMessage 发送帮助消息
-func (h *MessageHandler) sendHelpMessage(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
+func (h *MessageHandler) sendHelpMessage(ctx context.Context, event *larkim.P2MessageReceiveV1, username, source string, userLog *model.ChatLog) error {
 	receiveIDType := "open_id"
 	receiveID := *event.Event.Sender.SenderId.OpenId
 	if *event.Event.Message.ChatType == "group" {
@@ -187,6 +239,15 @@ func (h *MessageHandler) sendHelpMessage(ctx context.Context, event *larkim.P2Me
 
 	helpText := GetHelpMessage()
 	_, err := h.client.SendMarkdownMessage(ctx, receiveIDType, receiveID, "使用帮助", helpText)
+
+	// 保存帮助消息到数据库
+	if userLog != nil {
+		_, saveErr := h.chatLogService.CreateAIMessage(username, source, helpText, userLog.ID)
+		if saveErr != nil {
+			logx.Error("Failed to save help message to database: %v", saveErr)
+		}
+	}
+
 	return err
 }
 

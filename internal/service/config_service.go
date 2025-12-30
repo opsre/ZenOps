@@ -93,6 +93,19 @@ func (s *ConfigService) GetEnabledLLMConfigs() ([]model.LLMConfig, error) {
 	return configs, err
 }
 
+// GetDefaultLLMConfig 获取默认LLM配置（第一个启用的配置）
+func (s *ConfigService) GetDefaultLLMConfig() (*model.LLMConfig, error) {
+	var config model.LLMConfig
+	err := s.db.Where("enabled = ?", true).Order("id").First(&config).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &config, nil
+}
+
 // ========== 云厂商账号配置管理 ==========
 
 // ListProviderAccounts 列出云厂商账号
@@ -296,13 +309,13 @@ func (s *ConfigService) UpsertMCPTool(tool *model.MCPTool) error {
 	tool.UpdatedAt = now
 
 	return s.db.Exec(`
-		INSERT INTO mcp_tools (server_id, name, description, isEnabled, inputSchema, created_at, updated_at)
+		INSERT INTO mcp_tools (server_id, name, description, is_enabled, input_schema, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(server_id, name)
 		DO UPDATE SET
 			description = excluded.description,
-			isEnabled = excluded.isEnabled,
-			inputSchema = excluded.inputSchema,
+			is_enabled = excluded.is_enabled,
+			input_schema = excluded.input_schema,
 			updated_at = excluded.updated_at
 	`, tool.ServerID, tool.Name, tool.Description, tool.IsEnabled,
 		string(inputSchemaJSON), tool.CreatedAt, tool.UpdatedAt).Error

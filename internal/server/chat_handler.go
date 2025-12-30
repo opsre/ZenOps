@@ -12,17 +12,23 @@ import (
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
 	"github.com/eryajf/zenops/internal/config"
+	"github.com/eryajf/zenops/internal/model"
+	"github.com/eryajf/zenops/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
 // ChatHandler 处理 AI 对话请求
 type ChatHandler struct {
-	config *config.Config
+	config         *config.Config
+	chatLogService *service.ChatLogService
 }
 
 // NewChatHandler 创建 ChatHandler
 func NewChatHandler(cfg *config.Config) *ChatHandler {
-	return &ChatHandler{config: cfg}
+	return &ChatHandler{
+		config:         cfg,
+		chatLogService: service.NewChatLogService(),
+	}
 }
 
 // ChatMessage 对话消息
@@ -86,6 +92,34 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 			Message: "Invalid request: " + err.Error(),
 		})
 		return
+	}
+
+	// 获取用户名（从请求头或使用默认值）
+	username := c.GetHeader("X-Username")
+	if username == "" {
+		username = "api_user"
+	}
+
+	// 提取用户最后一条消息
+	var userMessage string
+	if len(req.Messages) > 0 {
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			if req.Messages[i].Role == "user" {
+				userMessage = req.Messages[i].Content
+				break
+			}
+		}
+	}
+
+	// 保存用户消息到数据库
+	var userLog *model.ChatLog
+	if userMessage != "" {
+		var err error
+		userLog, err = h.chatLogService.CreateUserMessage(username, "API", userMessage)
+		if err != nil {
+			logx.Error("Failed to save user message: %v", err)
+			// 不阻断请求，继续处理
+		}
 	}
 
 	// 检查 LLM 配置
@@ -198,6 +232,9 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 			return
 		}
 
+		// 用于收集AI的完整响应
+		var aiResponse strings.Builder
+
 		reader := bufio.NewReader(resp.Body)
 		for {
 			line, err := reader.ReadString('\n')
@@ -214,6 +251,17 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 				continue
 			}
 
+			// 提取AI响应内容
+			if strings.HasPrefix(line, "data: ") && line != "data: [DONE]" {
+				dataStr := strings.TrimPrefix(line, "data: ")
+				var chunk StreamChunk
+				if err := json.Unmarshal([]byte(dataStr), &chunk); err == nil {
+					if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
+						aiResponse.WriteString(chunk.Choices[0].Delta.Content)
+					}
+				}
+			}
+
 			// 直接转发 SSE 数据
 			fmt.Fprintf(c.Writer, "%s\n\n", line)
 			flusher.Flush()
@@ -221,6 +269,14 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 			// 检查是否是结束标记
 			if line == "data: [DONE]" {
 				break
+			}
+		}
+
+		// 保存AI响应到数据库
+		if userLog != nil && aiResponse.Len() > 0 {
+			_, err := h.chatLogService.CreateAIMessage(username, "API", aiResponse.String(), userLog.ID)
+			if err != nil {
+				logx.Error("Failed to save AI response: %v", err)
 			}
 		}
 	} else {
@@ -232,6 +288,15 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 				Message: "Failed to decode response",
 			})
 			return
+		}
+
+		// 保存AI响应到数据库
+		if userLog != nil && len(chatResp.Choices) > 0 {
+			aiMessage := chatResp.Choices[0].Message.Content
+			_, err := h.chatLogService.CreateAIMessage(username, "API", aiMessage, userLog.ID)
+			if err != nil {
+				logx.Error("Failed to save AI response: %v", err)
+			}
 		}
 
 		c.JSON(http.StatusOK, Response{

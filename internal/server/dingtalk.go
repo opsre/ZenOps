@@ -17,6 +17,8 @@ import (
 	"cnb.cool/zhiqiangwang/pkg/logx"
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/imcp"
+	"github.com/eryajf/zenops/internal/model"
+	"github.com/eryajf/zenops/internal/service"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -221,9 +223,10 @@ func ExtractUserMessage(msg *DingTalkMessage) string {
 
 // DingTalkMessageHandler 消息处理器
 type DingTalkMessageHandler struct {
-	streamClient *DingTalkStreamClient
-	mcpServer    *imcp.MCPServer
-	config       *config.Config
+	streamClient   *DingTalkStreamClient
+	mcpServer      *imcp.MCPServer
+	config         *config.Config
+	chatLogService *service.ChatLogService
 }
 
 // NewDingTalkMessageHandler 创建消息处理器
@@ -236,9 +239,10 @@ func NewDingTalkMessageHandler(cfg *config.Config, mcpServer *imcp.MCPServer) *D
 	}
 
 	return &DingTalkMessageHandler{
-		streamClient: streamClient,
-		mcpServer:    mcpServer,
-		config:       cfg,
+		streamClient:   streamClient,
+		mcpServer:      mcpServer,
+		config:         cfg,
+		chatLogService: service.NewChatLogService(),
 	}
 }
 
@@ -254,25 +258,51 @@ func (h *DingTalkMessageHandler) HandleMessage(ctx context.Context, msg *DingTal
 
 	logx.Info("Processing DingTalk message, sender=%s, message=%s", msg.SenderNick, userMessage)
 
+	// 确定消息来源（私聊/群聊）
+	source := "私聊"
+	if msg.ConversationType == "2" {
+		source = "群聊"
+	}
+
+	// 保存用户消息到数据库
+	username := msg.SenderNick
+	if username == "" {
+		username = msg.SenderStaffID
+	}
+	userLog, err := h.chatLogService.CreateUserMessage(username, source, userMessage)
+	if err != nil {
+		logx.Error("Failed to save user message to database: %v", err)
+	}
+
 	// 帮助命令
 	if strings.Contains(userMessage, "帮助") {
+		helpText := "发送资源查询请求,如\"查询阿里云 ECS\"、\"列出 Jenkins 任务\"等"
+
+		// 保存帮助消息到数据库
+		if userLog != nil {
+			_, saveErr := h.chatLogService.CreateAIMessage(username, source, helpText, userLog.ID)
+			if saveErr != nil {
+				logx.Error("Failed to save help message to database: %v", saveErr)
+			}
+		}
+
 		return &DingTalkResponse{
 			MsgType: "text",
-			Text:    &DingTalkTextMsg{Content: "发送资源查询请求,如\"查询阿里云 ECS\"、\"列出 Jenkins 任务\"等"},
+			Text:    &DingTalkTextMsg{Content: helpText},
 		}, nil
 	}
 
 	// 解析意图
-	intent, err := ParseIntent(userMessage)
-	if err != nil {
+	intent, parseErr := ParseIntent(userMessage)
+	if parseErr != nil {
 		return &DingTalkResponse{
 			MsgType: "text",
-			Text:    &DingTalkTextMsg{Content: err.Error()},
+			Text:    &DingTalkTextMsg{Content: parseErr.Error()},
 		}, nil
 	}
 
 	// 异步处理查询
-	go h.processQueryAsync(ctx, msg, intent)
+	go h.processQueryAsync(ctx, msg, intent, username, source, userLog)
 
 	return &DingTalkResponse{
 		MsgType: "text",
@@ -281,7 +311,7 @@ func (h *DingTalkMessageHandler) HandleMessage(ctx context.Context, msg *DingTal
 }
 
 // processQueryAsync 异步处理查询
-func (h *DingTalkMessageHandler) processQueryAsync(ctx context.Context, msg *DingTalkMessage, intent *DingTalkIntent) {
+func (h *DingTalkMessageHandler) processQueryAsync(ctx context.Context, msg *DingTalkMessage, intent *DingTalkIntent, username, source string, userLog *model.ChatLog) {
 	question := ExtractUserMessage(msg)
 	trackID := fmt.Sprintf("track_%s_%d", msg.MsgID, time.Now().Unix())
 
@@ -320,6 +350,14 @@ func (h *DingTalkMessageHandler) processQueryAsync(ctx context.Context, msg *Din
 
 	// 5. 流式更新卡片
 	h.streamClient.StreamResponse(ctx, trackID, contentCh, question)
+
+	// 6. 保存AI响应到数据库
+	if userLog != nil && result != "" {
+		_, saveErr := h.chatLogService.CreateAIMessage(username, source, result, userLog.ID)
+		if saveErr != nil {
+			logx.Error("Failed to save AI response to database: %v", saveErr)
+		}
+	}
 }
 
 // callMCPTool 调用 MCP 工具

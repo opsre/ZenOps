@@ -399,7 +399,7 @@ func (c *Client) ChatWithToolsAndStream(ctx context.Context, userMessage string)
 
 			// 执行所有工具调用
 			for _, toolCall := range result.ToolCalls {
-				responseCh <- fmt.Sprintf("\n🔧 调用工具: **%s**\n", toolCall.Function.Name)
+				responseCh <- fmt.Sprintf("\n> 🔧 调用工具: **%s**\n", toolCall.Function.Name)
 
 				// 执行工具调用
 				toolResult, err := c.executeToolCall(ctx, toolCall)
