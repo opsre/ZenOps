@@ -6,6 +6,7 @@ import (
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
 	"github.com/eryajf/zenops/internal/config"
+	"github.com/eryajf/zenops/internal/service"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -457,5 +458,66 @@ func (s *MCPServer) ListTools(ctx context.Context) (*mcp.ListToolsResult, error)
 
 	return &mcp.ListToolsResult{
 		Tools: tools,
+	}, nil
+}
+
+// ListEnabledTools 列出所有启用的工具（过滤数据库中被禁用的工具）
+func (s *MCPServer) ListEnabledTools(ctx context.Context) (*mcp.ListToolsResult, error) {
+	// 1. 获取所有已注册的工具
+	toolsMap := s.mcpServer.ListTools()
+
+	// 2. 从数据库获取所有 MCP 服务器及其工具的启用状态
+	configService := service.NewConfigService()
+	servers, err := configService.ListMCPServers()
+	if err != nil {
+		logx.Warn("Failed to load MCP servers from database, returning all tools: %v", err)
+		// 如果数据库查询失败，返回所有工具（保持向后兼容）
+		var tools []mcp.Tool
+		for _, serverTool := range toolsMap {
+			tools = append(tools, serverTool.Tool)
+		}
+		return &mcp.ListToolsResult{Tools: tools}, nil
+	}
+
+	// 3. 构建工具启用状态映射：map[toolName]isEnabled
+	// 只有当服务器启用 AND 工具启用时，工具才真正可用
+	toolEnabledMap := make(map[string]bool)
+
+	for _, server := range servers {
+		// 如果服务器未启用，该服务器的所有工具都不可用
+		if !server.IsActive {
+			for _, tool := range server.Tools {
+				toolName := server.ToolPrefix + tool.Name
+				toolEnabledMap[toolName] = false
+			}
+			continue
+		}
+
+		// 服务器已启用，检查每个工具的状态
+		for _, tool := range server.Tools {
+			toolName := server.ToolPrefix + tool.Name
+			toolEnabledMap[toolName] = tool.IsEnabled
+		}
+	}
+
+	// 4. 过滤只返回启用的工具
+	var enabledTools []mcp.Tool
+	for _, serverTool := range toolsMap {
+		toolName := serverTool.Tool.Name
+
+		// 如果工具在数据库中有记录且被禁用，则跳过
+		if enabled, exists := toolEnabledMap[toolName]; exists && !enabled {
+			logx.Debug("Tool %s is disabled in database, skipping", toolName)
+			continue
+		}
+
+		// 工具启用或不在数据库中（内置工具默认启用）
+		enabledTools = append(enabledTools, serverTool.Tool)
+	}
+
+	logx.Debug("Filtered %d enabled tools out of %d total tools", len(enabledTools), len(toolsMap))
+
+	return &mcp.ListToolsResult{
+		Tools: enabledTools,
 	}, nil
 }

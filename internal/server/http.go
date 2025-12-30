@@ -27,6 +27,7 @@ type HTTPGinServer struct {
 	mcpServer      *imcp.MCPServer
 	wecomHandler   *wecom.MessageHandler
 	serviceManager *ServiceManager
+	chatHandler    *ChatHandler
 }
 
 // NewHTTPGinServer 创建基于 Gin 的 HTTP 服务器
@@ -61,6 +62,12 @@ func (s *HTTPGinServer) SetMCPServer(mcpServer *imcp.MCPServer) {
 
 	// 创建服务管理器
 	s.serviceManager = NewServiceManager(s.config, mcpServer)
+
+	// 创建 ChatHandler（需要 mcpServer）
+	s.chatHandler = NewChatHandler(s.config, mcpServer)
+
+	// 注册 AI 对话路由（需要在 mcpServer 设置后）
+	s.registerChatRoutes()
 
 	// 如果启用了企业微信,初始化消息处理器
 	if s.config.Wecom.Enabled {
@@ -239,13 +246,7 @@ func (s *HTTPGinServer) registerRoutes() {
 			logs.GET("/mcp", logHandler.GetMCPLogs)
 		}
 
-		// AI 对话路由
-		chatHandler := NewChatHandler(s.config)
-		chat := v1.Group("/chat")
-		{
-			chat.POST("/completions", chatHandler.Completions)
-			chat.GET("/models", chatHandler.GetModels)
-		}
+		// AI 对话路由将在 SetMCPServer() 中注册（需要 mcpServer）
 
 		// 对话历史路由
 		historyHandler := NewHistoryHandler()
@@ -304,6 +305,24 @@ func (s *HTTPGinServer) registerRoutes() {
 
 	// 前端静态文件服务 (SPA 模式)
 	s.registerStaticFiles()
+}
+
+// registerChatRoutes 注册 AI 对话路由（需要在 SetMCPServer 之后调用）
+func (s *HTTPGinServer) registerChatRoutes() {
+	if s.chatHandler == nil {
+		logx.Warn("ChatHandler is nil, skipping chat routes registration")
+		return
+	}
+
+	// AI 对话路由
+	v1 := s.engine.Group("/api/v1")
+	chat := v1.Group("/chat")
+	{
+		chat.POST("/completions", s.chatHandler.Completions)
+		chat.GET("/models", s.chatHandler.GetModels)
+	}
+
+	logx.Info("✅ Chat routes registered successfully")
 }
 
 // registerServiceRoutes 注册服务管理路由

@@ -1,17 +1,17 @@
 package server
 
 import (
-	"bufio"
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
 	"github.com/eryajf/zenops/internal/config"
+	"github.com/eryajf/zenops/internal/imcp"
+	"github.com/eryajf/zenops/internal/llm"
 	"github.com/eryajf/zenops/internal/model"
 	"github.com/eryajf/zenops/internal/service"
 	"github.com/gin-gonic/gin"
@@ -21,13 +21,28 @@ import (
 type ChatHandler struct {
 	config         *config.Config
 	chatLogService *service.ChatLogService
+	llmClient      *llm.Client
+	mcpServer      *imcp.MCPServer
 }
 
 // NewChatHandler 创建 ChatHandler
-func NewChatHandler(cfg *config.Config) *ChatHandler {
+func NewChatHandler(cfg *config.Config, mcpServer *imcp.MCPServer) *ChatHandler {
+	// 创建 LLM 客户端配置
+	var llmClient *llm.Client
+	if cfg.LLM.Enabled {
+		llmConfig := &llm.Config{
+			Model:   cfg.LLM.Model,
+			APIKey:  cfg.LLM.APIKey,
+			BaseURL: cfg.LLM.BaseURL,
+		}
+		llmClient = llm.NewClient(llmConfig, mcpServer)
+	}
+
 	return &ChatHandler{
 		config:         cfg,
 		chatLogService: service.NewChatLogService(),
+		llmClient:      llmClient,
+		mcpServer:      mcpServer,
 	}
 }
 
@@ -83,7 +98,7 @@ type StreamChunk struct {
 	} `json:"choices"`
 }
 
-// Completions 处理对话请求 (支持流式和非流式)
+// Completions 处理对话请求 (支持流式和非流式，集成 MCP 工具)
 func (h *ChatHandler) Completions(c *gin.Context) {
 	var req ChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -123,7 +138,7 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 	}
 
 	// 检查 LLM 配置
-	if !h.config.LLM.Enabled {
+	if !h.config.LLM.Enabled || h.llmClient == nil {
 		c.JSON(http.StatusServiceUnavailable, Response{
 			Code:    503,
 			Message: "LLM service is not enabled",
@@ -131,93 +146,23 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 		return
 	}
 
-	// 获取配置
-	apiKey := h.config.LLM.APIKey
-	baseURL := h.config.LLM.BaseURL
-	model := h.config.LLM.Model
+	// 使用 llm.Client 调用 LLM（支持 MCP 工具）
+	ctx := context.Background()
 
-	if apiKey == "" {
-		c.JSON(http.StatusServiceUnavailable, Response{
-			Code:    503,
-			Message: "LLM API key is not configured",
-		})
-		return
-	}
-
-	// 如果没有指定 base_url，使用 OpenAI 默认
-	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
-	}
-
-	// 使用请求中的模型或配置中的模型
-	if req.Model == "" {
-		req.Model = model
-	}
-	if req.Model == "" {
-		req.Model = "gpt-4o"
-	}
-
-	// 构建请求体
-	requestBody := map[string]interface{}{
-		"model":    req.Model,
-		"messages": req.Messages,
-		"stream":   req.Stream,
-	}
-	if req.Temperature > 0 {
-		requestBody["temperature"] = req.Temperature
-	}
-	if req.MaxTokens > 0 {
-		requestBody["max_tokens"] = req.MaxTokens
-	}
-
-	jsonBody, err := json.Marshal(requestBody)
+	// 调用 LLM 流式对话（会自动使用已启用的 MCP 工具）
+	responseCh, err := h.llmClient.ChatWithToolsAndStream(ctx, userMessage)
 	if err != nil {
+		logx.Error("Failed to call LLM: %v", err)
 		c.JSON(http.StatusInternalServerError, Response{
 			Code:    500,
-			Message: "Failed to marshal request",
+			Message: fmt.Sprintf("LLM调用失败: %v", err),
 		})
 		return
 	}
 
-	// 创建 HTTP 请求
-	httpReq, err := http.NewRequest("POST", baseURL+"/chat/completions", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, Response{
-			Code:    500,
-			Message: "Failed to create request",
-		})
-		return
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-
-	// 发送请求
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		logx.Error("LLM request failed: %v", err)
-		c.JSON(http.StatusInternalServerError, Response{
-			Code:    500,
-			Message: "LLM request failed: " + err.Error(),
-		})
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		logx.Error("LLM API error: status=%d, body=%s", resp.StatusCode, string(body))
-		c.JSON(resp.StatusCode, Response{
-			Code:    resp.StatusCode,
-			Message: "LLM API error: " + string(body),
-		})
-		return
-	}
-
-	// 处理响应
+	// 处理流式响应
 	if req.Stream {
-		// 流式响应
+		// 设置 SSE 响应头
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
 		c.Header("Connection", "keep-alive")
@@ -232,47 +177,65 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 			return
 		}
 
-		// 用于收集AI的完整响应
+		// 用于收集 AI 的完整响应
 		var aiResponse strings.Builder
+		responseCounter := 0
 
-		reader := bufio.NewReader(resp.Body)
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				logx.Error("Error reading stream: %v", err)
-				break
-			}
-
-			line = strings.TrimSpace(line)
-			if line == "" {
+		// 从响应通道读取流式数据
+		for content := range responseCh {
+			if content == "" {
 				continue
 			}
 
-			// 提取AI响应内容
-			if strings.HasPrefix(line, "data: ") && line != "data: [DONE]" {
-				dataStr := strings.TrimPrefix(line, "data: ")
-				var chunk StreamChunk
-				if err := json.Unmarshal([]byte(dataStr), &chunk); err == nil {
-					if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-						aiResponse.WriteString(chunk.Choices[0].Delta.Content)
-					}
-				}
+			aiResponse.WriteString(content)
+
+			// 构建 SSE 格式的响应（OpenAI 格式）
+			chunk := StreamChunk{
+				ID:      fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
+				Object:  "chat.completion.chunk",
+				Created: time.Now().Unix(),
+				Model:   req.Model,
+				Choices: []struct {
+					Index int `json:"index"`
+					Delta struct {
+						Role    string `json:"role,omitempty"`
+						Content string `json:"content,omitempty"`
+					} `json:"delta"`
+					FinishReason *string `json:"finish_reason"`
+				}{
+					{
+						Index: 0,
+						Delta: struct {
+							Role    string `json:"role,omitempty"`
+							Content string `json:"content,omitempty"`
+						}{
+							Content: content,
+						},
+						FinishReason: nil,
+					},
+				},
 			}
 
-			// 直接转发 SSE 数据
-			fmt.Fprintf(c.Writer, "%s\n\n", line)
+			// 序列化为 JSON
+			chunkJSON, err := json.Marshal(chunk)
+			if err != nil {
+				logx.Error("Failed to marshal chunk: %v", err)
+				continue
+			}
+
+			// 发送 SSE 数据
+			fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkJSON))
 			flusher.Flush()
-
-			// 检查是否是结束标记
-			if line == "data: [DONE]" {
-				break
-			}
+			responseCounter++
 		}
 
-		// 保存AI响应到数据库
+		// 发送结束标记
+		fmt.Fprintf(c.Writer, "data: [DONE]\n\n")
+		flusher.Flush()
+
+		logx.Info("Stream completed: sent %d chunks", responseCounter)
+
+		// 保存 AI 响应到数据库
 		if userLog != nil && aiResponse.Len() > 0 {
 			_, err := h.chatLogService.CreateAIMessage(username, "API", aiResponse.String(), userLog.ID)
 			if err != nil {
@@ -280,23 +243,48 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 			}
 		}
 	} else {
-		// 非流式响应
-		var chatResp ChatResponse
-		if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-			c.JSON(http.StatusInternalServerError, Response{
-				Code:    500,
-				Message: "Failed to decode response",
-			})
-			return
+		// 非流式响应：收集所有响应内容
+		var fullResponse strings.Builder
+		for content := range responseCh {
+			fullResponse.WriteString(content)
 		}
 
-		// 保存AI响应到数据库
-		if userLog != nil && len(chatResp.Choices) > 0 {
-			aiMessage := chatResp.Choices[0].Message.Content
+		aiMessage := fullResponse.String()
+
+		// 保存 AI 响应到数据库
+		if userLog != nil && aiMessage != "" {
 			_, err := h.chatLogService.CreateAIMessage(username, "API", aiMessage, userLog.ID)
 			if err != nil {
 				logx.Error("Failed to save AI response: %v", err)
 			}
+		}
+
+		// 构建非流式响应
+		chatResp := ChatResponse{
+			ID:      fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
+			Object:  "chat.completion",
+			Created: time.Now().Unix(),
+			Model:   req.Model,
+			Choices: []struct {
+				Index   int `json:"index"`
+				Message struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"message"`
+				FinishReason string `json:"finish_reason"`
+			}{
+				{
+					Index: 0,
+					Message: struct {
+						Role    string `json:"role"`
+						Content string `json:"content"`
+					}{
+						Role:    "assistant",
+						Content: aiMessage,
+					},
+					FinishReason: "stop",
+				},
+			},
 		}
 
 		c.JSON(http.StatusOK, Response{

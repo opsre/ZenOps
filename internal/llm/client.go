@@ -14,6 +14,7 @@ import (
 // MCPServer MCP服务器接口(避免循环导入)
 type MCPServer interface {
 	ListTools(ctx context.Context) (*mcp.ListToolsResult, error)
+	ListEnabledTools(ctx context.Context) (*mcp.ListToolsResult, error)
 	CallTool(ctx context.Context, name string, arguments map[string]any) (*mcp.CallToolResult, error)
 }
 
@@ -263,16 +264,16 @@ func (c *Client) executeToolCall(ctx context.Context, toolCall ToolCall) (string
 	return "工具执行完成,但未返回结果", nil
 }
 
-// getMCPTools 获取 MCP 工具列表
+// getMCPTools 获取 MCP 工具列表（只返回启用的工具）
 func (c *Client) getMCPTools(ctx context.Context) ([]Tool, error) {
 	if c.mcpServer == nil {
 		return nil, fmt.Errorf("MCP server not initialized")
 	}
 
-	// 获取工具列表
-	toolList, err := c.mcpServer.ListTools(ctx)
+	// 获取启用的工具列表（会从数据库过滤被禁用的工具）
+	toolList, err := c.mcpServer.ListEnabledTools(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list MCP tools: %w", err)
+		return nil, fmt.Errorf("failed to list enabled MCP tools: %w", err)
 	}
 
 	var tools []Tool
@@ -288,6 +289,7 @@ func (c *Client) getMCPTools(ctx context.Context) ([]Tool, error) {
 		})
 	}
 
+	logx.Info("Loaded %d enabled MCP tools for LLM", len(tools))
 	return tools, nil
 }
 
