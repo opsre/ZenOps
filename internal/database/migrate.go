@@ -44,6 +44,7 @@ func AutoMigrate(db *gorm.DB) error {
 
 	// 迁移所有配置表
 	err := db.AutoMigrate(
+		&model.User{},
 		&model.LLMConfig{},
 		&model.ProviderAccount{},
 		&model.IMConfig{},
@@ -58,6 +59,49 @@ func AutoMigrate(db *gorm.DB) error {
 		return fmt.Errorf("failed to migrate tables: %w", err)
 	}
 
+	// 创建默认用户
+	if err := createDefaultUser(db); err != nil {
+		logx.Error("Failed to create default user: %v", err)
+		// 不返回错误，继续启动
+	}
+
+	return nil
+}
+
+// createDefaultUser 创建默认管理员用户
+func createDefaultUser(db *gorm.DB) error {
+	// 检查是否已存在用户
+	var count int64
+	if err := db.Model(&model.User{}).Count(&count).Error; err != nil {
+		return err
+	}
+
+	// 如果已有用户，不创建
+	if count > 0 {
+		logx.Info("Users already exist, skipping default user creation")
+		return nil
+	}
+
+	// 创建默认管理员用户
+	defaultUser := &model.User{
+		Username: "admin",
+		Nickname: "管理员",
+		Email:    "admin@zenops.local",
+		Roles:    "admin,user",
+		Enabled:  true,
+	}
+
+	// 设置默认密码: admin123
+	if err := defaultUser.SetPassword("admin123"); err != nil {
+		return fmt.Errorf("failed to set default password: %w", err)
+	}
+
+	// 创建用户
+	if err := db.Create(defaultUser).Error; err != nil {
+		return fmt.Errorf("failed to create default user: %w", err)
+	}
+
+	logx.Info("✅ Default admin user created successfully (username: admin, password: admin123)")
 	return nil
 }
 

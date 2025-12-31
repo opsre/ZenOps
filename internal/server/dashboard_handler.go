@@ -51,15 +51,24 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 	var avgLatency float64
 	db.Model(&model.MCPLog{}).Select("AVG(latency)").Row().Scan(&avgLatency)
 
+	// 统计对话总次数
+	var totalChats int64
+	db.Model(&model.ChatLog{}).Count(&totalChats)
+
+	// MCP 调用总次数就是 totalLogs
+	totalMCPCalls := totalLogs
+
 	c.JSON(http.StatusOK, Response{
 		Code:    0,
 		Message: "success",
 		Data: gin.H{
-			"activeBots":   activeBots,
-			"totalServers": totalServers,
-			"totalTools":   totalTools,
-			"successRate":  successRate,
-			"avgLatency":   int(avgLatency),
+			"activeBots":    activeBots,
+			"totalServers":  totalServers,
+			"totalTools":    totalTools,
+			"successRate":   successRate,
+			"avgLatency":    int(avgLatency),
+			"totalMCPCalls": totalMCPCalls,
+			"totalChats":    totalChats,
 		},
 	})
 }

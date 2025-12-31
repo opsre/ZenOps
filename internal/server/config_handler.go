@@ -1102,6 +1102,25 @@ func (h *ConfigHandler) TestMCPTool(c *gin.Context) {
 	result, err := mcpManager.CallTool(ctx, serverName, toolName, cleanedArgs)
 	latency := time.Since(startTime).Milliseconds()
 
+	// 记录 MCP 调用日志
+	mcpLogService := service.NewMCPLogService()
+	logParams := &service.MCPLogParams{
+		ServerName: serverName,
+		ToolName:   toolName,
+		Username:   "admin", // 管理后台测试，可以从用户session获取实际用户名
+		Source:     "admin_test",
+		Request:    cleanedArgs,
+		Response:   result,
+		Latency:    latency,
+		Success:    err == nil,
+	}
+	if err != nil {
+		logParams.ErrorMessage = err.Error()
+	}
+	if _, logErr := mcpLogService.CreateMCPLog(logParams); logErr != nil {
+		logx.Warn("Failed to save MCP log: %v", logErr)
+	}
+
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, Response{
 			Code:    500,

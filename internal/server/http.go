@@ -11,6 +11,7 @@ import (
 	"cnb.cool/zhiqiangwang/pkg/logx"
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/imcp"
+	"github.com/eryajf/zenops/internal/middleware"
 	"github.com/eryajf/zenops/internal/model"
 	"github.com/eryajf/zenops/internal/provider"
 	aliyunprovider "github.com/eryajf/zenops/internal/provider/aliyun"
@@ -158,17 +159,24 @@ func (s *HTTPGinServer) registerRoutes() {
 		// 健康检查
 		v1.GET("/health", s.handleHealth)
 
-		// 用户认证路由 (开发模式模拟接口)
+		// 用户认证路由
+		authHandler := NewAuthHandler()
 		userHandler := NewUserHandler()
-		user := v1.Group("/user")
-		{
-			user.GET("/info", userHandler.GetUserInfo)
-			user.GET("/menu/list", userHandler.GetMenuList)
-		}
+
+		// 公开路由 (不需要认证)
 		auth := v1.Group("/auth")
 		{
-			auth.POST("/login", userHandler.Login)
-			auth.POST("/logout", userHandler.Logout)
+			auth.POST("/login", authHandler.Login)
+			auth.POST("/logout", authHandler.Logout)
+		}
+
+		// 需要认证的用户路由
+		user := v1.Group("/user")
+		user.Use(middleware.AuthMiddleware())
+		{
+			user.GET("/info", authHandler.GetUserInfo)
+			user.GET("/menu/list", userHandler.GetMenuList)
+			user.POST("/change-password", authHandler.ChangePassword)
 		}
 
 		// 阿里云路由
@@ -244,6 +252,7 @@ func (s *HTTPGinServer) registerRoutes() {
 		logs := v1.Group("/logs")
 		{
 			logs.GET("/mcp", logHandler.GetMCPLogs)
+			logs.GET("/mcp/stats", logHandler.GetMCPLogStats)
 		}
 
 		// AI 对话路由将在 SetMCPServer() 中注册（需要 mcpServer）

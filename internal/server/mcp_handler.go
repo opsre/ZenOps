@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/eryajf/zenops/internal/model"
+	"cnb.cool/zhiqiangwang/pkg/logx"
 	"github.com/eryajf/zenops/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -48,23 +48,26 @@ func (h *MCPHandler) DebugExecute(c *gin.Context) {
 	// 这里需要集成 MCP Client Manager 来实际执行工具
 	// 暂时返回模拟数据
 
-	latency := int(time.Since(startTime).Milliseconds())
+	latency := time.Since(startTime).Milliseconds()
 
-	// 记录日志
-	db := h.configService.GetDB()
-	logEntry := model.MCPLog{
-		ID:         uuid.New().String(),
-		Timestamp:  time.Now(),
+	// 记录日志（使用新的 MCPLogService）
+	mcpLogService := service.NewMCPLogService()
+	logParams := &service.MCPLogParams{
 		ServerName: req.ServerID,
 		ToolName:   req.ToolName,
-		Status:     "success",
-		Latency:    latency,
-		Request:    req.ToolName,
+		Username:   "system",
+		Source:     "mcp_handler",
+		Request:    map[string]interface{}{"tool": req.ToolName},
 		Response:   "Tool execution result placeholder",
+		Latency:    latency,
+		Success:    true,
 	}
-	db.Create(&logEntry)
+	if _, err := mcpLogService.CreateMCPLog(logParams); err != nil {
+		logx.Warn("Failed to save MCP log: %v", err)
+	}
 
 	_ = ctx // 使用 ctx
+	_ = uuid.New() // 避免 unused import 错误
 
 	c.JSON(http.StatusOK, Response{
 		Code:    0,

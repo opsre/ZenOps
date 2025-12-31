@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
+	"github.com/eryajf/zenops/internal/service"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -248,8 +250,48 @@ func (c *Client) executeToolCall(ctx context.Context, toolCall ToolCall) (string
 		toolCall.Function.Name,
 		params)
 
+	// 记录调用开始时间
+	startTime := time.Now()
+
 	// 调用 MCP 工具
 	result, err := c.mcpServer.CallTool(ctx, toolCall.Function.Name, params)
+	latency := time.Since(startTime).Milliseconds()
+
+	// 解析 server_name 和 tool_name
+	// 外部 MCP 工具格式: "prefix_toolname"，例如 "aliyun-ack_list_clusters"
+	// 内置工具没有前缀，例如 "search_ecs_by_ip"
+	serverName := "zenops" // 默认为内置工具
+	toolName := toolCall.Function.Name
+
+	// 尝试从工具名中提取前缀（外部 MCP 工具）
+	if idx := strings.Index(toolCall.Function.Name, "_"); idx > 0 {
+		// 可能是外部工具，检查前缀是否包含连字符（如 "aliyun-ack"）
+		prefix := toolCall.Function.Name[:idx]
+		if strings.Contains(prefix, "-") {
+			serverName = prefix
+			toolName = toolCall.Function.Name[idx+1:]
+		}
+	}
+
+	// 记录 MCP 调用日志
+	mcpLogService := service.NewMCPLogService()
+	logParams := &service.MCPLogParams{
+		ServerName: serverName,
+		ToolName:   toolName,
+		Username:   "llm", // LLM 自动调用，用户信息需要从上下文传递
+		Source:     "llm",
+		Request:    params,
+		Response:   result,
+		Latency:    latency,
+		Success:    err == nil,
+	}
+	if err != nil {
+		logParams.ErrorMessage = err.Error()
+	}
+	if _, logErr := mcpLogService.CreateMCPLog(logParams); logErr != nil {
+		logx.Warn("Failed to save MCP log: %v", logErr)
+	}
+
 	if err != nil {
 		return "", fmt.Errorf("failed to call MCP tool: %w", err)
 	}
