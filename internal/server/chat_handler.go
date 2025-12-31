@@ -297,23 +297,36 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 
 // GetModels 获取可用的模型列表
 func (h *ChatHandler) GetModels(c *gin.Context) {
-	// 返回一些常用的模型
-	models := []map[string]interface{}{
-		{"id": "gpt-4o", "name": "GPT-4o", "provider": "openai"},
-		{"id": "gpt-4o-mini", "name": "GPT-4o Mini", "provider": "openai"},
-		{"id": "gpt-4-turbo", "name": "GPT-4 Turbo", "provider": "openai"},
-		{"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo", "provider": "openai"},
-		{"id": "deepseek-chat", "name": "DeepSeek Chat", "provider": "deepseek"},
-		{"id": "deepseek-coder", "name": "DeepSeek Coder", "provider": "deepseek"},
-		{"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet", "provider": "anthropic"},
+	// 从数据库读取 LLM 配置
+	configService := service.NewConfigService()
+	llmConfigs, err := configService.ListLLMConfigs()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: fmt.Sprintf("Failed to load LLM configs: %v", err),
+		})
+		return
 	}
 
-	// 如果配置了默认模型，标记它
-	configuredModel := h.config.LLM.Model
-	for i, m := range models {
-		if m["id"] == configuredModel {
-			models[i]["default"] = true
+	// 转换为前端期望的格式，只返回启用的模型
+	models := []map[string]interface{}{}
+	for _, cfg := range llmConfigs {
+		if !cfg.Enabled {
+			continue
 		}
+
+		model := map[string]interface{}{
+			"id":       cfg.Model,
+			"name":     cfg.Name,
+			"provider": cfg.Provider,
+		}
+
+		// 标记默认模型（与当前配置的模型匹配）
+		if h.config.LLM.Enabled && cfg.Model == h.config.LLM.Model {
+			model["default"] = true
+		}
+
+		models = append(models, model)
 	}
 
 	c.JSON(http.StatusOK, Response{
