@@ -88,6 +88,9 @@ var runCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logx.Info("🧘 Starting ZenOps Server, Version %s", Version)
 
+		// 初始化版本信息处理器
+		server.InitVersionHandler(Version, GitCommit, BuildTime)
+
 		// 检查 flag 冲突
 		if httpOnly && mcpOnly {
 			return fmt.Errorf("--http-only 和 --mcp-only 不能同时使用")

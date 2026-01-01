@@ -159,6 +159,9 @@ func (s *HTTPGinServer) registerRoutes() {
 		// 健康检查
 		v1.GET("/health", s.handleHealth)
 
+		// 版本信息
+		v1.GET("/version", GetVersionInfo)
+
 		// 用户认证路由
 		authHandler := NewAuthHandler()
 		userHandler := NewUserHandler()
@@ -798,7 +801,9 @@ func (s *HTTPGinServer) handleAliyunOSSList(c *gin.Context) {
 	}
 
 	// 创建临时客户端
-	var ossClient interface{ ListOSSBuckets(context.Context, int, int, map[string]string) ([]*model.OSSBucket, error) }
+	var ossClient interface {
+		ListOSSBuckets(context.Context, int, int, map[string]string) ([]*model.OSSBucket, error)
+	}
 	for _, region := range aliyunConfig.Regions {
 		c, err := createAliyunClient(aliyunConfig.AK, aliyunConfig.SK, region)
 		if err == nil {
@@ -853,7 +858,9 @@ func (s *HTTPGinServer) handleAliyunOSSGet(c *gin.Context) {
 	}
 
 	// 创建临时客户端
-	var ossClient interface{ GetOSSBucket(context.Context, string) (*model.OSSBucket, error) }
+	var ossClient interface {
+		GetOSSBucket(context.Context, string) (*model.OSSBucket, error)
+	}
 	for _, region := range aliyunConfig.Regions {
 		c, err := createAliyunClient(aliyunConfig.AK, aliyunConfig.SK, region)
 		if err == nil {

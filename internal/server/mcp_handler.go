@@ -66,7 +66,7 @@ func (h *MCPHandler) DebugExecute(c *gin.Context) {
 		logx.Warn("Failed to save MCP log: %v", err)
 	}
 
-	_ = ctx // 使用 ctx
+	_ = ctx        // 使用 ctx
 	_ = uuid.New() // 避免 unused import 错误
 
 	c.JSON(http.StatusOK, Response{

@@ -14,19 +14,42 @@ jobs:
   build-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout 后端代码
+        uses: actions/checkout@v6
+
+      - name: Checkout 前端代码
+        uses: actions/checkout@v6
+        with:
+          repository: eryajf/zenops-web
+          path: zenops-web
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Node.js 环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'zenops-web/package-lock.json'
+
+      - name: 构建前端
+        run: make build-web
+
       - name: 设置go环境
         uses: actions/setup-go@v6
         with:
           go-version-file: "go.mod"
           cache-dependency-path: "go.sum"
+
       - name: 安装 UPX
         uses: crazy-max/ghaction-upx@v3
         with:
           install-only: true
+
       - run: |
           echo "Building for Tag: ${{ github.ref_name }}"
+
       - run: go install github.com/authelia/gox@latest # setup gox
+
       - run: make gox-all
 
       - name: 上传二进制

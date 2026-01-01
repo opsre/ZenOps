@@ -150,7 +150,7 @@ func (s *MCPLogService) GetMCPLogStats() (map[string]interface{}, error) {
 
 	// 平均延迟
 	var avgLatency float64
-	if err := s.db.Model(&model.MCPLog{}).Select("AVG(latency)").Scan(&avgLatency).Error; err != nil {
+	if err := s.db.Model(&model.MCPLog{}).Select("COALESCE(AVG(latency), 0)").Scan(&avgLatency).Error; err != nil {
 		return nil, err
 	}
 	stats["avg_latency"] = avgLatency
