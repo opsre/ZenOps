@@ -53,6 +53,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.MCPTool{},
 		&model.MCPLog{},
 		&model.ChatLog{},
+		&model.Conversation{},
 		&model.SystemConfig{},
 	)
 	if err != nil {

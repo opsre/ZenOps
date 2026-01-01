@@ -31,12 +31,18 @@ func (s *ChatLogService) CreateChatLog(log *model.ChatLog) error {
 
 // CreateUserMessage 创建用户消息日志
 func (s *ChatLogService) CreateUserMessage(username, source, content string) (*model.ChatLog, error) {
+	return s.CreateUserMessageWithConversation(username, source, content, 0)
+}
+
+// CreateUserMessageWithConversation 创建用户消息日志（带会话ID）
+func (s *ChatLogService) CreateUserMessageWithConversation(username, source, content string, conversationID uint) (*model.ChatLog, error) {
 	log := &model.ChatLog{
-		Username:      username,
-		Source:        source,
-		ChatType:      1, // 1=用户提问
-		ParentContent: 0,
-		Content:       content,
+		Username:       username,
+		Source:         source,
+		ChatType:       1, // 1=用户提问
+		ParentContent:  0,
+		ConversationID: conversationID,
+		Content:        content,
 	}
 	err := s.CreateChatLog(log)
 	if err != nil {
@@ -47,12 +53,18 @@ func (s *ChatLogService) CreateUserMessage(username, source, content string) (*m
 
 // CreateAIMessage 创建AI回复日志
 func (s *ChatLogService) CreateAIMessage(username, source, content string, parentID uint) (*model.ChatLog, error) {
+	return s.CreateAIMessageWithConversation(username, source, content, parentID, 0)
+}
+
+// CreateAIMessageWithConversation 创建AI回复日志（带会话ID）
+func (s *ChatLogService) CreateAIMessageWithConversation(username, source, content string, parentID, conversationID uint) (*model.ChatLog, error) {
 	log := &model.ChatLog{
-		Username:      username,
-		Source:        source,
-		ChatType:      2, // 2=AI回答
-		ParentContent: parentID,
-		Content:       content,
+		Username:       username,
+		Source:         source,
+		ChatType:       2, // 2=AI回答
+		ParentContent:  parentID,
+		ConversationID: conversationID,
+		Content:        content,
 	}
 	err := s.CreateChatLog(log)
 	if err != nil {

@@ -265,6 +265,17 @@ func (s *HTTPGinServer) registerRoutes() {
 			history.GET("/chats/:id/context", historyHandler.GetChatContext)
 		}
 
+		// 会话管理路由
+		conversationHandler := NewConversationHandler()
+		conversations := v1.Group("/conversations")
+		{
+			conversations.POST("", conversationHandler.CreateConversation)
+			conversations.GET("", conversationHandler.ListConversations)
+			conversations.GET("/:id", conversationHandler.GetConversation)
+			conversations.PUT("/:id", conversationHandler.UpdateConversation)
+			conversations.DELETE("/:id", conversationHandler.DeleteConversation)
+		}
+
 		// 配置管理路由
 		config := v1.Group("/config")
 		{

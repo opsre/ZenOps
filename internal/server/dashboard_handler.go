@@ -32,9 +32,11 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 	var totalServers int64
 	db.Model(&model.MCPServer{}).Count(&totalServers)
 
-	// 统计 MCP 工具总数
+	// 统计 MCP 工具总数（只统计属于有效服务器的工具）
 	var totalTools int64
-	db.Model(&model.MCPTool{}).Count(&totalTools)
+	db.Model(&model.MCPTool{}).
+		Joins("INNER JOIN mcp_servers ON mcp_tools.server_id = mcp_servers.id").
+		Count(&totalTools)
 
 	// 计算成功率(基于最近的日志)
 	var totalLogs int64
