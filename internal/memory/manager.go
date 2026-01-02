@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
@@ -212,6 +213,18 @@ func (m *Manager) GetCachedAnswer(username, question string) (string, bool, erro
 
 // UpdateQACache 更新问答缓存
 func (m *Manager) UpdateQACache(username, question, answer string) error {
+	// 检查答案质量 - 不缓存错误响应
+	if m.isErrorResponse(answer) {
+		logx.Debug("Skipping QA cache for error response")
+		return nil
+	}
+
+	// 检查答案长度 - 太短的答案可能不是有效回复
+	if len(answer) < 10 {
+		logx.Debug("Skipping QA cache for too short answer (len=%d)", len(answer))
+		return nil
+	}
+
 	hash := m.calculateQuestionHash(question)
 
 	// 1. 更新 SQLite
@@ -230,6 +243,8 @@ func (m *Manager) UpdateQACache(username, question, answer string) error {
 		FirstOrCreate(cache).Error; err != nil {
 		return fmt.Errorf("failed to update QA cache: %w", err)
 	}
+
+	logx.Debug("✅ QA cache saved: question_hash=%s", hash[:8])
 
 	// 2. 更新 Redis
 	if m.redis != nil {
@@ -277,6 +292,94 @@ func (m *Manager) GetCacheStats() (*CacheStats, error) {
 func (m *Manager) calculateQuestionHash(question string) string {
 	hash := sha256.Sum256([]byte(question))
 	return fmt.Sprintf("%x", hash[:8]) // 取前 8 字节
+}
+
+// isErrorResponse 判断是否为错误响应
+func (m *Manager) isErrorResponse(answer string) bool {
+	// 检查常见的错误标记
+	errorKeywords := []string{
+		"❌",
+		"LLM 调用失败",
+		"Agent 调用失败",
+		"Agent 系统未初始化",
+		"i/o timeout",
+		"connection refused",
+		"dial tcp",
+		"context deadline exceeded",
+		"failed to",
+		"error:",
+		"Error:",
+		"失败:",
+		"错误:",
+		"异常:",
+	}
+
+	for _, keyword := range errorKeywords {
+		if strings.Contains(answer, keyword) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// ClearQACache 清理 QA 缓存
+func (m *Manager) ClearQACache(username string, questionHash string) error {
+	query := m.db.Model(&model.QACache{})
+
+	// 如果指定了用户名，只清理该用户的缓存
+	if username != "" {
+		query = query.Where("username = ?", username)
+	}
+
+	// 如果指定了问题哈希，只清理特定问题
+	if questionHash != "" {
+		query = query.Where("question_hash = ?", questionHash)
+	}
+
+	if err := query.Delete(&model.QACache{}).Error; err != nil {
+		return fmt.Errorf("failed to clear QA cache: %w", err)
+	}
+
+	// 清理 Redis 缓存
+	if m.redis != nil && questionHash != "" {
+		if err := m.redis.DeleteCachedAnswer(questionHash); err != nil {
+			logx.Warn("Failed to delete QA cache from Redis: %v", err)
+		}
+	}
+
+	logx.Info("✅ QA cache cleared: username=%s, question_hash=%s", username, questionHash)
+	return nil
+}
+
+// ClearErrorCache 清理所有错误缓存
+func (m *Manager) ClearErrorCache() (int64, error) {
+	// 查找所有可能是错误的缓存
+	var caches []model.QACache
+	if err := m.db.Find(&caches).Error; err != nil {
+		return 0, fmt.Errorf("failed to query QA cache: %w", err)
+	}
+
+	var deletedCount int64
+	for _, cache := range caches {
+		if m.isErrorResponse(cache.Answer) {
+			if err := m.db.Delete(&cache).Error; err != nil {
+				logx.Warn("Failed to delete error cache: %v", err)
+				continue
+			}
+			deletedCount++
+
+			// 从 Redis 删除
+			if m.redis != nil {
+				if err := m.redis.DeleteCachedAnswer(cache.QuestionHash); err != nil {
+					logx.Warn("Failed to delete from Redis: %v", err)
+				}
+			}
+		}
+	}
+
+	logx.Info("✅ Cleared %d error caches", deletedCount)
+	return deletedCount, nil
 }
 
 // incrementQACacheHit 增加 QA 缓存命中次数（异步）

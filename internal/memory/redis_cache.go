@@ -185,6 +185,14 @@ func (r *RedisCache) SetCachedAnswer(questionHash, answer string) error {
 	return r.client.Set(ctx, key, answer, r.ttl).Err()
 }
 
+// DeleteCachedAnswer 删除缓存的答案（Redis）
+func (r *RedisCache) DeleteCachedAnswer(questionHash string) error {
+	key := fmt.Sprintf("qa:%s", questionHash)
+	ctx := context.Background()
+
+	return r.client.Del(ctx, key).Err()
+}
+
 // GetActiveSession 获取用户当前活跃会话 ID
 func (r *RedisCache) GetActiveSession(username string) (uint, error) {
 	key := fmt.Sprintf("session:%s:active", username)
