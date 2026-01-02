@@ -55,9 +55,25 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.ChatLog{},
 		&model.Conversation{},
 		&model.SystemConfig{},
+		// Eino 集成新增的表
+		&model.UserContext{},
+		&model.QACache{},
+		&model.KnowledgeDocument{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate tables: %w", err)
+	}
+
+	// 创建 FTS5 全文索引
+	if err := createFTS5Indexes(db); err != nil {
+		logx.Warn("Failed to create FTS5 indexes: %v", err)
+		// 不返回错误，继续启动
+	}
+
+	// 创建用户上下文唯一索引
+	if err := createUniqueIndexes(db); err != nil {
+		logx.Warn("Failed to create unique indexes: %v", err)
+		// 不返回错误，继续启动
 	}
 
 	// 创建默认用户
@@ -203,5 +219,67 @@ func migrateLLMConfig(db *gorm.DB) error {
 		logx.Info("Successfully migrated %d LLM configs", len(newConfigs))
 	}
 
+	return nil
+}
+
+// createFTS5Indexes 创建 FTS5 全文索引
+func createFTS5Indexes(db *gorm.DB) error {
+	// 为 knowledge_documents 创建 FTS5 索引
+	sql := `
+		CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+			title,
+			content,
+			content='knowledge_documents',
+			content_rowid='id',
+			tokenize='porter unicode61'
+		)
+	`
+	if err := db.Exec(sql).Error; err != nil {
+		return fmt.Errorf("failed to create knowledge_fts: %w", err)
+	}
+
+	// 创建触发器以保持 FTS5 索引同步
+	triggers := []string{
+		// INSERT 触发器
+		`CREATE TRIGGER IF NOT EXISTS knowledge_fts_insert AFTER INSERT ON knowledge_documents BEGIN
+			INSERT INTO knowledge_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
+		END`,
+		// UPDATE 触发器
+		`CREATE TRIGGER IF NOT EXISTS knowledge_fts_update AFTER UPDATE ON knowledge_documents BEGIN
+			UPDATE knowledge_fts SET title = new.title, content = new.content WHERE rowid = new.id;
+		END`,
+		// DELETE 触发器
+		`CREATE TRIGGER IF NOT EXISTS knowledge_fts_delete AFTER DELETE ON knowledge_documents BEGIN
+			DELETE FROM knowledge_fts WHERE rowid = old.id;
+		END`,
+	}
+
+	for _, trigger := range triggers {
+		if err := db.Exec(trigger).Error; err != nil {
+			return fmt.Errorf("failed to create trigger: %w", err)
+		}
+	}
+
+	logx.Info("✅ FTS5 indexes created successfully")
+	return nil
+}
+
+// createUniqueIndexes 创建唯一索引
+func createUniqueIndexes(db *gorm.DB) error {
+	// 为 user_contexts 创建复合唯一索引
+	sql := `CREATE UNIQUE INDEX IF NOT EXISTS idx_user_contexts_unique
+		ON user_contexts(username, context_key)`
+	if err := db.Exec(sql).Error; err != nil {
+		return fmt.Errorf("failed to create unique index on user_contexts: %w", err)
+	}
+
+	// 为 qa_cache 创建复合唯一索引
+	sql = `CREATE UNIQUE INDEX IF NOT EXISTS idx_qa_cache_unique
+		ON qa_cache(question_hash, username)`
+	if err := db.Exec(sql).Error; err != nil {
+		return fmt.Errorf("failed to create unique index on qa_cache: %w", err)
+	}
+
+	logx.Info("✅ Unique indexes created successfully")
 	return nil
 }
