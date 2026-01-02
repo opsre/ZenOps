@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
+	"github.com/eryajf/zenops/internal/agent"
 	"github.com/eryajf/zenops/internal/config"
+	"github.com/eryajf/zenops/internal/database"
 	"github.com/eryajf/zenops/internal/imcp"
 	"github.com/eryajf/zenops/internal/mcpclient"
 	_ "github.com/eryajf/zenops/internal/provider/aliyun"  // 注册 aliyun provider
@@ -152,7 +154,18 @@ var runCmd = &cobra.Command{
 		// 4. 创建 MCP 服务器 (钉钉和飞书共享)
 		mcpServer := imcp.NewMCPServer(cfg)
 
-		// 5. 注册外部 MCP 的工具 (如果启用)
+		// 5. 初始化 Agent 系统 (Memory Manager, Knowledge Retriever, Orchestrator, Stream Handler)
+		db := database.GetDB()
+		agentSystem, err := agent.Initialize(ctx, db, mcpServer, cfg)
+		if err != nil {
+			logx.Error("❌ Failed to initialize Agent system: %v", err)
+		} else {
+			logx.Info("✅ Agent system ready for use")
+			// 设置全局 Agent (供 HTTP 服务使用)
+			server.SetGlobalAgent(agentSystem)
+		}
+
+		// 6. 注册外部 MCP 的工具 (如果启用)
 		if cfg.Server.MCP.AutoRegisterExternalTools {
 			logx.Info("🔧 Registering external MCP tools...")
 			if err := mcpServer.RegisterExternalMCPTools(ctx, mcpClientManager); err != nil {

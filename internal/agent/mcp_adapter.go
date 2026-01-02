@@ -18,12 +18,12 @@ type MCPToolAdapter struct {
 	name      string
 	desc      string
 	schema    any
-	mcpServer *imcp.Server
+	mcpServer *imcp.MCPServer
 	username  string // 调用用户（用于日志记录）
 }
 
 // NewMCPToolAdapter 创建 MCP Tool 适配器
-func NewMCPToolAdapter(name, desc string, schema any, mcpServer *imcp.Server, username string) *MCPToolAdapter {
+func NewMCPToolAdapter(name, desc string, schema any, mcpServer *imcp.MCPServer, username string) *MCPToolAdapter {
 	return &MCPToolAdapter{
 		name:      name,
 		desc:      desc,
@@ -35,15 +35,23 @@ func NewMCPToolAdapter(name, desc string, schema any, mcpServer *imcp.Server, us
 
 // Info 返回工具信息（实现 Eino Tool 接口）
 func (t *MCPToolAdapter) Info(ctx context.Context) (*schema.ToolInfo, error) {
+	// 将 schema 断言为 *schema.ParamsOneOf 类型
+	var paramsOneOf *schema.ParamsOneOf
+	if t.schema != nil {
+		if p, ok := t.schema.(*schema.ParamsOneOf); ok {
+			paramsOneOf = p
+		}
+	}
+
 	return &schema.ToolInfo{
 		Name:        t.name,
 		Desc:        t.desc,
-		ParamsOneOf: t.schema,
+		ParamsOneOf: paramsOneOf,
 	}, nil
 }
 
 // InvokableRun 执行工具（实现 Eino Tool 接口）
-func (t *MCPToolAdapter) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...schema.OptionItem[schema.RunOption]) (string, error) {
+func (t *MCPToolAdapter) InvokableRun(ctx context.Context, argumentsInJSON string) (string, error) {
 	logx.Debug("🔧 MCP Tool invoked: %s, args: %s", t.name, argumentsInJSON)
 
 	// 解析参数
@@ -144,30 +152,21 @@ func (t *MCPToolAdapter) logMCPCall(toolName string, params map[string]any, resu
 	}
 }
 
-// BuildMCPTools 从 MCP Server 构建 Eino Tools
-func BuildMCPTools(mcpServer *imcp.Server, username string) ([]schema.ToolInfo, error) {
+// BuildMCPToolAdapters 从 MCP Server 构建 Eino Tool Adapters
+func BuildMCPToolAdapters(mcpServer *imcp.MCPServer, username string) ([]*MCPToolAdapter, error) {
 	// 获取启用的 MCP 工具列表
 	toolList, err := mcpServer.ListEnabledTools(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("failed to list enabled MCP tools: %w", err)
 	}
 
-	var tools []schema.ToolInfo
+	var adapters []*MCPToolAdapter
 	for _, tool := range toolList.Tools {
 		adapter := NewMCPToolAdapter(tool.Name, tool.Description, tool.InputSchema, mcpServer, username)
-
-		// 构建 ToolInfo
-		info := schema.ToolInfo{
-			Name:        tool.Name,
-			Desc:        tool.Description,
-			ParamsOneOf: tool.InputSchema,
-		}
-
-		tools = append(tools, info)
-
+		adapters = append(adapters, adapter)
 		logx.Debug("📦 Loaded MCP tool: %s", tool.Name)
 	}
 
-	logx.Info("✅ Loaded %d enabled MCP tools for Eino Agent", len(tools))
-	return tools, nil
+	logx.Info("✅ Loaded %d enabled MCP tools for Eino Agent", len(adapters))
+	return adapters, nil
 }

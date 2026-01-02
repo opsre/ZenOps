@@ -33,4 +33,9 @@ const (
 	ConfigKeyCacheEnabled                          = "cache.enabled"
 	ConfigKeyCacheType                             = "cache.type"
 	ConfigKeyCacheTTL                              = "cache.ttl"
+	ConfigKeyCacheRedisHost                        = "cache.redis.host"
+	ConfigKeyCacheRedisPort                        = "cache.redis.port"
+	ConfigKeyCacheRedisPassword                    = "cache.redis.password"
+	ConfigKeyCacheRedisDB                          = "cache.redis.db"
+	ConfigKeyCacheRedisPoolSize                    = "cache.redis.pool_size"
 )

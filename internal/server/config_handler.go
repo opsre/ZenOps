@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
+	"github.com/eryajf/zenops/internal/agent"
 	"github.com/eryajf/zenops/internal/mcpclient"
 	"github.com/eryajf/zenops/internal/model"
 	"github.com/eryajf/zenops/internal/service"
@@ -29,6 +30,19 @@ func GetGlobalMCPManager() *mcpclient.Manager {
 // SetGlobalMCPManager 设置全局 MCP 客户端管理器
 func SetGlobalMCPManager(m *mcpclient.Manager) {
 	globalMCPManager = m
+}
+
+// 全局 Agent 系统
+var globalAgent *agent.Agent
+
+// GetGlobalAgent 获取全局 Agent 系统
+func GetGlobalAgent() *agent.Agent {
+	return globalAgent
+}
+
+// SetGlobalAgent 设置全局 Agent 系统
+func SetGlobalAgent(a *agent.Agent) {
+	globalAgent = a
 }
 
 // parseHeaderString 解析旧格式的 header 字符串

@@ -13,9 +13,9 @@ import (
 // Orchestrator Agent 编排器（简化版）
 // TODO: 未来将使用 Eino Graph 实现完整的编排能力
 type Orchestrator struct {
-	memoryMgr    *memory.Manager
-	knowledgeRet *knowledge.Retriever
-	mcpServer    *imcp.Server
+	memoryMgr     *memory.Manager
+	knowledgeRet  *knowledge.Retriever
+	mcpServer     *imcp.MCPServer
 	maxIterations int
 }
 
@@ -23,7 +23,7 @@ type Orchestrator struct {
 func NewOrchestrator(
 	memoryMgr *memory.Manager,
 	knowledgeRet *knowledge.Retriever,
-	mcpServer *imcp.Server,
+	mcpServer *imcp.MCPServer,
 ) *Orchestrator {
 	return &Orchestrator{
 		memoryMgr:    memoryMgr,
@@ -49,7 +49,17 @@ func (o *Orchestrator) Execute(ctx context.Context, req *ChatRequest) (*ChatResp
 	if err != nil {
 		logx.Warn("Failed to load conversation history: %v", err)
 	}
-	logx.Debug("Loaded %d messages from conversation history", len(chatLogs))
+
+	// 转换为 memory.Message 格式
+	var history []memory.Message
+	for _, log := range chatLogs {
+		history = append(history, memory.Message{
+			Role:      o.chatTypeToRole(log.ChatType),
+			Content:   log.Content,
+			CreatedAt: log.CreatedAt,
+		})
+	}
+	logx.Debug("Loaded %d messages from conversation history", len(history))
 
 	// 3. 加载用户上下文
 	userCtx, err := o.memoryMgr.GetUserContext(req.Username)
@@ -68,14 +78,8 @@ func (o *Orchestrator) Execute(ctx context.Context, req *ChatRequest) (*ChatResp
 		}
 	}
 
-	// 5. 构建状态
-	state := &AgentState{
-		Username:       req.Username,
-		ConversationID: req.ConversationID,
-		UserMessage:    req.Message,
-		Messages:       o.buildMessages(chatLogs, userCtx, knowledgeDocs, req.Message),
-		Iteration:      0,
-	}
+	// 5. 构建消息（暂时保留，但不使用 - 用于未来的完整 Eino Graph 实现）
+	_ = o.buildMessages(history, userCtx, knowledgeDocs, req.Message)
 
 	// 6. 执行推理循环（简化版）
 	// TODO: 替换为 Eino Graph 实现
@@ -102,7 +106,7 @@ func (o *Orchestrator) Execute(ctx context.Context, req *ChatRequest) (*ChatResp
 
 // buildMessages 构建 LLM 消息（包含历史、上下文、知识库）
 func (o *Orchestrator) buildMessages(
-	chatLogs []*memory.Message,
+	history []memory.Message,
 	userCtx *memory.UserContext,
 	knowledgeDocs []*knowledge.Document,
 	userMessage string,
@@ -117,10 +121,10 @@ func (o *Orchestrator) buildMessages(
 	})
 
 	// 历史消息
-	for _, log := range chatLogs {
+	for _, msg := range history {
 		messages = append(messages, Message{
-			Role:    log.Role,
-			Content: log.Content,
+			Role:    msg.Role,
+			Content: msg.Content,
 		})
 	}
 
@@ -167,4 +171,16 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// chatTypeToRole 将 ChatType 转换为 Role 字符串
+func (o *Orchestrator) chatTypeToRole(chatType int) string {
+	switch chatType {
+	case 1:
+		return "user"
+	case 2:
+		return "assistant"
+	default:
+		return "system"
+	}
 }

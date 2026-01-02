@@ -100,3 +100,10 @@ cache:
   enabled: true
   type: "memory"  # memory 或 redis
   ttl: 300  # 缓存过期时间(秒)
+  # Redis 配置 (当 type 为 redis 时生效)
+  redis:
+    host: "localhost"
+    port: 6379
+    password: ""  # Redis 密码,无密码留空
+    db: 0  # Redis 数据库编号 (0-15)
+    pool_size: 10  # 连接池大小

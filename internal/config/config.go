@@ -104,9 +104,19 @@ type AuthConfig struct {
 
 // CacheConfig 缓存配置
 type CacheConfig struct {
-	Enabled bool   `mapstructure:"enabled"`
-	Type    string `mapstructure:"type"` // memory, redis
-	TTL     int    `mapstructure:"ttl"`  // 秒
+	Enabled bool        `mapstructure:"enabled"`
+	Type    string      `mapstructure:"type"` // memory, redis
+	TTL     int         `mapstructure:"ttl"`  // 秒
+	Redis   RedisConfig `mapstructure:"redis"`
+}
+
+// RedisConfig Redis 配置
+type RedisConfig struct {
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
+	PoolSize int    `mapstructure:"pool_size"` // 连接池大小
 }
 
 var globalConfig *Config
