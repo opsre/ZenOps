@@ -8,11 +8,9 @@ import (
 	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
+	"github.com/eryajf/zenops/internal/agent"
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/imcp"
-	"github.com/eryajf/zenops/internal/llm"
-	"github.com/eryajf/zenops/internal/model"
-	"github.com/eryajf/zenops/internal/service"
 	"github.com/google/uuid"
 )
 
@@ -31,8 +29,6 @@ type MessageHandler struct {
 	config              *config.Config
 	Client              *AIBotClient // 导出以便外部访问
 	mcpServer           *imcp.MCPServer
-	llmClient           *llm.Client
-	chatLogService      *service.ChatLogService
 	conversationManager sync.Map // 存储对话状态
 	msgIDCache          sync.Map // 消息ID缓存,用于去重
 }
@@ -44,24 +40,10 @@ func NewMessageHandler(cfg *config.Config, mcpServer *imcp.MCPServer) (*MessageH
 		return nil, err
 	}
 
-	// 初始化 LLM 客户端
-	var llmClient *llm.Client
-	if cfg.LLM.Enabled {
-		llmConfig := &llm.Config{
-			Model:   cfg.LLM.Model,
-			APIKey:  cfg.LLM.APIKey,
-			BaseURL: cfg.LLM.BaseURL,
-		}
-		llmClient = llm.NewClient(llmConfig, mcpServer)
-		logx.Info("LLM client initialized for Wecom, model %s", cfg.LLM.Model)
-	}
-
 	handler := &MessageHandler{
-		config:         cfg,
-		Client:         client,
-		mcpServer:      mcpServer,
-		llmClient:      llmClient,
-		chatLogService: service.NewChatLogService(),
+		config:    cfg,
+		Client:    client,
+		mcpServer: mcpServer,
 	}
 
 	// 启动消息缓存清理协程
@@ -147,21 +129,17 @@ func (h *MessageHandler) processMessage(ctx context.Context, req *UserReq, conve
 		source = "群聊"
 	}
 
-	// 保存用户消息到数据库
-	userLog, err := h.chatLogService.CreateUserMessage(req.From.Userid, source, userMessage)
-	if err != nil {
-		logx.Error("Failed to save user message to database: %v", err)
-	}
-
 	// 特殊命令处理
 	if strings.Contains(userMessage, "帮助") || strings.Contains(userMessage, "help") {
-		h.sendHelpMessage(state, req.From.Userid, source, userLog)
+		h.sendHelpMessage(state, req.From.Userid, source)
 		return
 	}
 
 	// 如果启用了 LLM,使用 LLM 处理
-	if h.config.LLM.Enabled && h.llmClient != nil {
-		h.processLLMMessage(ctx, userMessage, state, req.From.Userid, source, userLog)
+	// 使用新的 Agent 系统处理消息
+	agentSystem := agent.GetGlobalAgent()
+	if agentSystem != nil && agentSystem.StreamHandler != nil {
+		h.processAgentMessage(ctx, userMessage, state, req.From.Userid, source)
 		return
 	}
 
@@ -173,27 +151,41 @@ func (h *MessageHandler) processMessage(ctx context.Context, req *UserReq, conve
 	state.Mutex.Unlock()
 }
 
-// processLLMMessage 使用 LLM 处理消息
-func (h *MessageHandler) processLLMMessage(ctx context.Context, userMessage string, state *ConversationState, username, source string, userLog *model.ChatLog) {
-	// 调用 LLM 流式对话
-	responseCh, err := h.llmClient.ChatWithToolsAndStream(ctx, userMessage)
-	if err != nil {
-		logx.Error("Failed to call LLM: %v", err)
+// processAgentMessage 使用 Agent 系统处理消息
+func (h *MessageHandler) processAgentMessage(ctx context.Context, userMessage string, state *ConversationState, username, source string) {
+	// 获取全局 Agent 系统
+	agentSystem := agent.GetGlobalAgent()
+	if agentSystem == nil || agentSystem.StreamHandler == nil {
 		state.Mutex.Lock()
-		state.Buffer.WriteString(fmt.Sprintf("❌ LLM 调用失败: %v", err))
+		state.Buffer.WriteString("❌ Agent 系统未初始化")
 		state.IsDone = true
 		state.Mutex.Unlock()
 		return
 	}
 
-	// 用于收集完整的AI响应
-	var aiResponse strings.Builder
+	// 构建 Agent 请求
+	agentReq := &agent.ChatRequest{
+		Username:       username,
+		Message:        userMessage,
+		ConversationID: 0, // WeCom 不使用数据库会话管理
+		Source:         source,
+	}
+
+	// 调用 Agent 流式对话
+	responseCh, err := agentSystem.StreamHandler.ChatStream(ctx, agentReq)
+	if err != nil {
+		logx.Error("Failed to call Agent: %v", err)
+		state.Mutex.Lock()
+		state.Buffer.WriteString(fmt.Sprintf("❌ Agent 调用失败: %v", err))
+		state.IsDone = true
+		state.Mutex.Unlock()
+		return
+	}
 
 	// 流式接收并缓存响应
 	for event := range responseCh {
 		state.Mutex.Lock()
 		state.Buffer.WriteString(event)
-		aiResponse.WriteString(event)
 		if state.IsVisited {
 			select {
 			case state.NotificationChan <- event:
@@ -203,17 +195,7 @@ func (h *MessageHandler) processLLMMessage(ctx context.Context, userMessage stri
 		state.Mutex.Unlock()
 	}
 
-	// 保存AI响应到数据库
-	if userLog != nil && aiResponse.Len() > 0 {
-		var parentID uint
-		parentID = userLog.ID
-		_, err := h.chatLogService.CreateAIMessage(username, source, aiResponse.String(), parentID)
-		if err != nil {
-			logx.Error("Failed to save AI response to database: %v", err)
-		}
-	}
-
-	// 标记完成
+	// Agent 已经保存消息到数据库，标记完成
 	state.Mutex.Lock()
 	state.IsDone = true
 	state.Mutex.Unlock()
@@ -223,20 +205,13 @@ func (h *MessageHandler) processLLMMessage(ctx context.Context, userMessage stri
 }
 
 // sendHelpMessage 发送帮助消息
-func (h *MessageHandler) sendHelpMessage(state *ConversationState, username, source string, userLog *model.ChatLog) {
+func (h *MessageHandler) sendHelpMessage(state *ConversationState, username, source string) {
 	helpText := GetHelpMessage()
 	state.Mutex.Lock()
 	state.Buffer.WriteString(helpText)
 	state.IsDone = true
 	state.Mutex.Unlock()
-
-	// 保存帮助消息到数据库
-	if userLog != nil {
-		_, err := h.chatLogService.CreateAIMessage(username, source, helpText, userLog.ID)
-		if err != nil {
-			logx.Error("Failed to save help message to database: %v", err)
-		}
-	}
+	// Agent already handles message persistence
 }
 
 // startMessageCleanup 启动消息缓存清理协程

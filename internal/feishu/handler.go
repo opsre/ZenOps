@@ -8,68 +8,28 @@ import (
 	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
+	"github.com/eryajf/zenops/internal/agent"
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/imcp"
-	"github.com/eryajf/zenops/internal/llm"
-	"github.com/eryajf/zenops/internal/model"
-	"github.com/eryajf/zenops/internal/service"
 	larkcontact "github.com/larksuite/oapi-sdk-go/v3/service/contact/v3"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
 
 // MessageHandler 飞书消息处理器
 type MessageHandler struct {
-	client         *Client
-	config         *config.Config
-	mcpServer      *imcp.MCPServer
-	llmClient      *llm.Client
-	chatLogService *service.ChatLogService
+	client    *Client
+	config    *config.Config
+	mcpServer *imcp.MCPServer
 }
 
 // NewMessageHandler 创建消息处理器
 func NewMessageHandler(cfg *config.Config, mcpServer *imcp.MCPServer) (*MessageHandler, error) {
 	client := NewClient(cfg.Feishu.AppID, cfg.Feishu.AppSecret)
 
-	// 初始化 LLM 客户端
-	// 优先从数据库读取 LLM 配置，如果数据库没有配置则使用 config.yaml
-	var llmClient *llm.Client
-	configService := service.NewConfigService()
-	dbLLMConfig, err := configService.GetDefaultLLMConfig()
-
-	var llmEnabled bool
-	var llmConfig *llm.Config
-
-	if err == nil && dbLLMConfig != nil && dbLLMConfig.Enabled {
-		// 使用数据库配置
-		llmEnabled = true
-		llmConfig = &llm.Config{
-			Model:   dbLLMConfig.Model,
-			APIKey:  dbLLMConfig.APIKey,
-			BaseURL: dbLLMConfig.BaseURL,
-		}
-		logx.Info("⚗️ Using LLM Config from Database: %s (Model: %s)", dbLLMConfig.Name, dbLLMConfig.Model)
-	} else if cfg.LLM.Enabled {
-		// 降级使用 config.yaml 配置
-		llmEnabled = true
-		llmConfig = &llm.Config{
-			Model:   cfg.LLM.Model,
-			APIKey:  cfg.LLM.APIKey,
-			BaseURL: cfg.LLM.BaseURL,
-		}
-		logx.Info("⚗️ Using LLM Config from config.yaml (Model: %s)", cfg.LLM.Model)
-	}
-
-	if llmEnabled {
-		llmClient = llm.NewClient(llmConfig, mcpServer)
-		logx.Info("⚗️ LLM Client Initialized For Feishu")
-	}
-
 	return &MessageHandler{
-		client:         client,
-		config:         cfg,
-		mcpServer:      mcpServer,
-		llmClient:      llmClient,
-		chatLogService: service.NewChatLogService(),
+		client:    client,
+		config:    cfg,
+		mcpServer: mcpServer,
 	}, nil
 }
 
@@ -102,21 +62,17 @@ func (h *MessageHandler) HandleTextMessage(ctx context.Context, event *larkim.P2
 		source = "群聊"
 	}
 
-	// 保存用户消息到数据库
 	username := *event.Event.Sender.SenderId.OpenId
-	userLog, err := h.chatLogService.CreateUserMessage(username, source, userMessage)
-	if err != nil {
-		logx.Error("Failed to save user message to database: %v", err)
-	}
 
 	// 特殊命令处理
 	if strings.Contains(userMessage, "帮助") || strings.Contains(userMessage, "help") {
-		return h.sendHelpMessage(ctx, event, username, source, userLog)
+		return h.sendHelpMessage(ctx, event, username, source)
 	}
 
-	// 如果启用了 LLM,使用 LLM 处理
-	if h.config.LLM.Enabled && h.llmClient != nil {
-		return h.processLLMMessage(ctx, event, userMessage, username, source, userLog)
+	// 使用新的 Agent 系统处理消息
+	agentSystem := agent.GetGlobalAgent()
+	if agentSystem != nil && agentSystem.StreamHandler != nil {
+		return h.processAgentMessage(ctx, event, userMessage, username, source)
 	}
 
 	// 否则返回默认消息
@@ -131,8 +87,8 @@ func (h *MessageHandler) HandleTextMessage(ctx context.Context, event *larkim.P2
 		"ZenOps 飞书机器人已收到您的消息。当前未启用 LLM 对话功能,请联系管理员配置。")
 }
 
-// processLLMMessage 使用 LLM 处理消息(流式卡片更新)
-func (h *MessageHandler) processLLMMessage(ctx context.Context, event *larkim.P2MessageReceiveV1, userMessage, username, source string, userLog *model.ChatLog) error {
+// processAgentMessage 使用 Agent 系统处理消息(流式卡片更新)
+func (h *MessageHandler) processAgentMessage(ctx context.Context, event *larkim.P2MessageReceiveV1, userMessage, username, source string) error {
 	receiveIDType := "open_id"
 	receiveID := *event.Event.Sender.SenderId.OpenId
 	if *event.Event.Message.ChatType == "group" {
@@ -140,12 +96,27 @@ func (h *MessageHandler) processLLMMessage(ctx context.Context, event *larkim.P2
 		receiveID = *event.Event.Message.ChatId
 	}
 
-	// 调用 LLM 流式对话
-	responseCh, err := h.llmClient.ChatWithToolsAndStream(ctx, userMessage)
-	if err != nil {
-		logx.Error("Failed to call LLM: %v", err)
+	// 获取全局 Agent 系统
+	agentSystem := agent.GetGlobalAgent()
+	if agentSystem == nil || agentSystem.StreamHandler == nil {
 		return h.client.SendTextMessage(ctx, receiveIDType, receiveID,
-			fmt.Sprintf("LLM 调用失败: %v", err))
+			"❌ Agent 系统未初始化")
+	}
+
+	// 构建 Agent 请求
+	agentReq := &agent.ChatRequest{
+		Username:       username,
+		Message:        userMessage,
+		ConversationID: 0, // Feishu 不使用数据库会话管理
+		Source:         source,
+	}
+
+	// 调用 Agent 流式对话
+	responseCh, err := agentSystem.StreamHandler.ChatStream(ctx, agentReq)
+	if err != nil {
+		logx.Error("Failed to call Agent: %v", err)
+		return h.client.SendTextMessage(ctx, receiveIDType, receiveID,
+			fmt.Sprintf("❌ Agent 调用失败: %v", err))
 	}
 
 	// 创建流式卡片
@@ -197,14 +168,7 @@ func (h *MessageHandler) processLLMMessage(ctx context.Context, event *larkim.P2
 					logx.Error("Failed to send final update: %v", err)
 				}
 
-				// 保存AI响应到数据库
-				if userLog != nil && aiResponse.Len() > 0 {
-					_, err := h.chatLogService.CreateAIMessage(username, source, aiResponse.String(), userLog.ID)
-					if err != nil {
-						logx.Error("Failed to save AI response to database: %v", err)
-					}
-				}
-
+				// Agent already handles message persistence
 				return nil
 			}
 			fullResponse.WriteString(content)
@@ -229,7 +193,7 @@ func (h *MessageHandler) processLLMMessage(ctx context.Context, event *larkim.P2
 }
 
 // sendHelpMessage 发送帮助消息
-func (h *MessageHandler) sendHelpMessage(ctx context.Context, event *larkim.P2MessageReceiveV1, username, source string, userLog *model.ChatLog) error {
+func (h *MessageHandler) sendHelpMessage(ctx context.Context, event *larkim.P2MessageReceiveV1, username, source string) error {
 	receiveIDType := "open_id"
 	receiveID := *event.Event.Sender.SenderId.OpenId
 	if *event.Event.Message.ChatType == "group" {
@@ -239,15 +203,7 @@ func (h *MessageHandler) sendHelpMessage(ctx context.Context, event *larkim.P2Me
 
 	helpText := GetHelpMessage()
 	_, err := h.client.SendMarkdownMessage(ctx, receiveIDType, receiveID, "使用帮助", helpText)
-
-	// 保存帮助消息到数据库
-	if userLog != nil {
-		_, saveErr := h.chatLogService.CreateAIMessage(username, source, helpText, userLog.ID)
-		if saveErr != nil {
-			logx.Error("Failed to save help message to database: %v", saveErr)
-		}
-	}
-
+	// Agent already handles message persistence
 	return err
 }
 
