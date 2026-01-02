@@ -9,10 +9,9 @@ import (
 	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
+	"github.com/eryajf/zenops/internal/agent"
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/imcp"
-	"github.com/eryajf/zenops/internal/llm"
-	"github.com/eryajf/zenops/internal/model"
 	"github.com/eryajf/zenops/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -22,28 +21,15 @@ type ChatHandler struct {
 	config              *config.Config
 	chatLogService      *service.ChatLogService
 	conversationService *service.ConversationService
-	llmClient           *llm.Client
 	mcpServer           *imcp.MCPServer
 }
 
 // NewChatHandler 创建 ChatHandler
 func NewChatHandler(cfg *config.Config, mcpServer *imcp.MCPServer) *ChatHandler {
-	// 创建 LLM 客户端配置
-	var llmClient *llm.Client
-	if cfg.LLM.Enabled {
-		llmConfig := &llm.Config{
-			Model:   cfg.LLM.Model,
-			APIKey:  cfg.LLM.APIKey,
-			BaseURL: cfg.LLM.BaseURL,
-		}
-		llmClient = llm.NewClient(llmConfig, mcpServer)
-	}
-
 	return &ChatHandler{
 		config:              cfg,
 		chatLogService:      service.NewChatLogService(),
 		conversationService: service.NewConversationService(),
-		llmClient:           llmClient,
 		mcpServer:           mcpServer,
 	}
 }
@@ -129,104 +115,40 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 		}
 	}
 
-	// 保存用户消息到数据库
-	var userLog *model.ChatLog
-	if userMessage != "" {
-		var err error
-		userLog, err = h.chatLogService.CreateUserMessageWithConversation(username, "API", userMessage, req.ConversationID)
-		if err != nil {
-			logx.Error("Failed to save user message: %v", err)
-			// 不阻断请求，继续处理
-		}
-		// 如果有会话ID，更新会话的最后消息时间
-		if req.ConversationID > 0 && err == nil {
-			if err := h.conversationService.UpdateLastMessageAt(req.ConversationID); err != nil {
-				logx.Error("Failed to update conversation last message time: %v", err)
-			}
-		}
-	}
-
-	// 动态加载 LLM 配置（从数据库）
-	configService := service.NewConfigService()
-	var llmConfig *model.LLMConfig
-	var err error
-
-	// 如果请求中指定了模型ID，尝试从数据库中查找对应的配置
-	if req.Model != "" {
-		// 先尝试按名称查找（Model字段）
-		llmConfigs, err := configService.ListLLMConfigs()
-		if err == nil {
-			for _, cfg := range llmConfigs {
-				if cfg.Model == req.Model && cfg.Enabled {
-					llmConfig = &cfg
-					break
-				}
-			}
-		}
-	}
-
-	// 如果没有找到指定的模型，使用默认的已启用模型
-	if llmConfig == nil {
-		llmConfig, err = configService.GetDefaultLLMConfig()
-		if err != nil {
-			logx.Error("Failed to get default LLM config: %v", err)
-			c.JSON(http.StatusInternalServerError, Response{
-				Code:    500,
-				Message: fmt.Sprintf("Failed to load LLM config: %v", err),
-			})
-			return
-		}
-		if llmConfig == nil {
-			c.JSON(http.StatusServiceUnavailable, Response{
-				Code:    503,
-				Message: "No enabled LLM configuration found. Please configure an LLM model first.",
-			})
-			return
-		}
-	}
-
-	// 使用数据库中的配置创建 LLM 客户端
-	llmClientConfig := &llm.Config{
-		Model:   llmConfig.Model,
-		APIKey:  llmConfig.APIKey,
-		BaseURL: llmConfig.BaseURL,
-	}
-	llmClient := llm.NewClient(llmClientConfig, h.mcpServer)
-
-	logx.Info("Using LLM config: provider=%s, model=%s", llmConfig.Provider, llmConfig.Model)
-
-	// 使用 llm.Client 调用 LLM（支持 MCP 工具）
-	ctx := context.Background()
-
-	// 将前端传来的消息转换为 LLM 消息格式
-	llmMessages := make([]llm.Message, 0, len(req.Messages))
-	for _, msg := range req.Messages {
-		llmMessages = append(llmMessages, llm.Message{
-			Role:    msg.Role,
-			Content: msg.Content,
-		})
-	}
-
-	// 调用 LLM 流式对话（传递完整的消息历史，会自动使用已启用的 MCP 工具）
-	var responseCh <-chan string
-	if len(llmMessages) > 0 {
-		// 使用新方法传递完整的消息历史
-		responseCh, err = llmClient.ChatWithToolsAndStreamMessages(ctx, llmMessages)
-	} else {
-		// 降级：如果没有消息历史，使用旧方法
-		responseCh, err = llmClient.ChatWithToolsAndStream(ctx, userMessage)
-	}
-
-	if err != nil {
-		logx.Error("Failed to call LLM: %v", err)
-		c.JSON(http.StatusInternalServerError, Response{
-			Code:    500,
-			Message: fmt.Sprintf("LLM调用失败: %v", err),
+	// 获取全局 Agent 系统
+	agentSystem := GetGlobalAgent()
+	if agentSystem == nil || agentSystem.StreamHandler == nil {
+		logx.Error("Agent system not initialized")
+		c.JSON(http.StatusServiceUnavailable, Response{
+			Code:    503,
+			Message: "Agent system is not available. Please check server configuration.",
 		})
 		return
 	}
 
-	logx.Info("Calling LLM with %d messages in history", len(llmMessages))
+	// 使用新的 Agent 系统调用 LLM
+	ctx := context.Background()
+
+	// 构建 Agent 请求
+	agentReq := &agent.ChatRequest{
+		Username:       username,
+		Message:        userMessage,
+		ConversationID: req.ConversationID,
+		Source:         "web",
+	}
+
+	// 调用 Agent 流式对话
+	responseCh, err := agentSystem.StreamHandler.ChatStream(ctx, agentReq)
+	if err != nil {
+		logx.Error("Failed to call Agent: %v", err)
+		c.JSON(http.StatusInternalServerError, Response{
+			Code:    500,
+			Message: fmt.Sprintf("Agent调用失败: %v", err),
+		})
+		return
+	}
+
+	logx.Info("Calling Agent with conversation_id=%d, username=%s", req.ConversationID, username)
 
 	// 处理流式响应
 	if req.Stream {
@@ -303,31 +225,25 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 
 		logx.Info("Stream completed: sent %d chunks", responseCounter)
 
-		// 保存 AI 响应到数据库
-		if userLog != nil && aiResponse.Len() > 0 {
-			_, err := h.chatLogService.CreateAIMessageWithConversation(username, "API", aiResponse.String(), userLog.ID, req.ConversationID)
-			if err != nil {
-				logx.Error("Failed to save AI response: %v", err)
+		// Agent 已经保存了消息，我们只需要更新会话元数据
+		if req.ConversationID > 0 && userMessage != "" {
+			// 更新会话的最后消息时间
+			if err := h.conversationService.UpdateLastMessageAt(req.ConversationID); err != nil {
+				logx.Error("Failed to update conversation last message time: %v", err)
 			}
-			// 如果有会话ID，更新会话的最后消息时间
-			if req.ConversationID > 0 && err == nil {
-				if err := h.conversationService.UpdateLastMessageAt(req.ConversationID); err != nil {
-					logx.Error("Failed to update conversation last message time: %v", err)
-				}
 
-				// 检查是否需要生成标题
-				shouldGenerate, err := h.conversationService.ShouldGenerateTitle(req.ConversationID)
-				if err == nil && shouldGenerate && userMessage != "" {
-					// 异步生成标题，避免阻塞响应
-					go func() {
-						title := h.generateConversationTitle(context.Background(), userMessage)
-						if err := h.conversationService.UpdateConversation(req.ConversationID, title); err != nil {
-							logx.Error("Failed to update conversation title: %v", err)
-						} else {
-							logx.Info("Generated conversation title: %s", title)
-						}
-					}()
-				}
+			// 检查是否需要生成标题
+			shouldGenerate, err := h.conversationService.ShouldGenerateTitle(req.ConversationID)
+			if err == nil && shouldGenerate {
+				// 异步生成标题，避免阻塞响应
+				go func() {
+					title := h.generateConversationTitle(context.Background(), userMessage)
+					if err := h.conversationService.UpdateConversation(req.ConversationID, title); err != nil {
+						logx.Error("Failed to update conversation title: %v", err)
+					} else {
+						logx.Info("Generated conversation title: %s", title)
+					}
+				}()
 			}
 		}
 	} else {
@@ -339,31 +255,25 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 
 		aiMessage := fullResponse.String()
 
-		// 保存 AI 响应到数据库
-		if userLog != nil && aiMessage != "" {
-			_, err := h.chatLogService.CreateAIMessageWithConversation(username, "API", aiMessage, userLog.ID, req.ConversationID)
-			if err != nil {
-				logx.Error("Failed to save AI response: %v", err)
+		// Agent 已经保存了消息，我们只需要更新会话元数据
+		if req.ConversationID > 0 && userMessage != "" {
+			// 更新会话的最后消息时间
+			if err := h.conversationService.UpdateLastMessageAt(req.ConversationID); err != nil {
+				logx.Error("Failed to update conversation last message time: %v", err)
 			}
-			// 如果有会话ID，更新会话的最后消息时间
-			if req.ConversationID > 0 && err == nil {
-				if err := h.conversationService.UpdateLastMessageAt(req.ConversationID); err != nil {
-					logx.Error("Failed to update conversation last message time: %v", err)
-				}
 
-				// 检查是否需要生成标题
-				shouldGenerate, err := h.conversationService.ShouldGenerateTitle(req.ConversationID)
-				if err == nil && shouldGenerate && userMessage != "" {
-					// 异步生成标题，避免阻塞响应
-					go func() {
-						title := h.generateConversationTitle(context.Background(), userMessage)
-						if err := h.conversationService.UpdateConversation(req.ConversationID, title); err != nil {
-							logx.Error("Failed to update conversation title: %v", err)
-						} else {
-							logx.Info("Generated conversation title: %s", title)
-						}
-					}()
-				}
+			// 检查是否需要生成标题
+			shouldGenerate, err := h.conversationService.ShouldGenerateTitle(req.ConversationID)
+			if err == nil && shouldGenerate {
+				// 异步生成标题，避免阻塞响应
+				go func() {
+					title := h.generateConversationTitle(context.Background(), userMessage)
+					if err := h.conversationService.UpdateConversation(req.ConversationID, title); err != nil {
+						logx.Error("Failed to update conversation title: %v", err)
+					} else {
+						logx.Info("Generated conversation title: %s", title)
+					}
+				}()
 			}
 		}
 
@@ -405,25 +315,16 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 
 // generateConversationTitle 生成会话标题
 func (h *ChatHandler) generateConversationTitle(ctx context.Context, userMessage string) string {
-	// 从数据库加载 LLM 配置
-	configService := service.NewConfigService()
-	llmConfig, err := configService.GetDefaultLLMConfig()
-	if err != nil || llmConfig == nil {
-		logx.Error("Failed to get default LLM config for title generation: %v", err)
-		// 如果生成失败，使用用户消息的前10个字符作为标题
+	// 获取全局 Agent 系统
+	agentSystem := GetGlobalAgent()
+	if agentSystem == nil || agentSystem.StreamHandler == nil {
+		logx.Warn("Agent system not available for title generation")
+		// 使用用户消息的前10个字符作为标题
 		if len(userMessage) > 10 {
 			return userMessage[:10] + "..."
 		}
 		return userMessage
 	}
-
-	// 创建 LLM 客户端
-	llmClientConfig := &llm.Config{
-		Model:   llmConfig.Model,
-		APIKey:  llmConfig.APIKey,
-		BaseURL: llmConfig.BaseURL,
-	}
-	llmClient := llm.NewClient(llmClientConfig, h.mcpServer)
 
 	// 构建生成标题的提示词
 	titlePrompt := fmt.Sprintf(`请根据下面的用户问题，生成一个简短的会话标题（5-15个字）。
@@ -433,8 +334,16 @@ func (h *ChatHandler) generateConversationTitle(ctx context.Context, userMessage
 
 会话标题：`, userMessage)
 
-	// 调用 LLM 生成标题
-	responseCh, err := llmClient.ChatWithToolsAndStream(ctx, titlePrompt)
+	// 构建临时请求（使用一个不存在的会话 ID 避免影响真实会话）
+	agentReq := &agent.ChatRequest{
+		Username:       "system",
+		Message:        titlePrompt,
+		ConversationID: 0, // 不保存到特定会话
+		Source:         "system",
+	}
+
+	// 调用 Agent 生成标题
+	responseCh, err := agentSystem.StreamHandler.ChatStream(ctx, agentReq)
 	if err != nil {
 		logx.Error("Failed to generate conversation title: %v", err)
 		// 如果生成失败，使用用户消息的前10个字符作为标题

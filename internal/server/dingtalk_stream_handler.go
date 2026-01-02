@@ -9,10 +9,9 @@ import (
 	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
+	"github.com/eryajf/zenops/internal/agent"
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/imcp"
-	"github.com/eryajf/zenops/internal/llm"
-	"github.com/eryajf/zenops/internal/model"
 	"github.com/eryajf/zenops/internal/service"
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -49,54 +48,18 @@ type DingTalkStreamHandler struct {
 	mcpServer      *imcp.MCPServer
 	streamClient   *client.StreamClient
 	intentParser   *IntentParser
-	llmClient      *llm.Client
 	chatLogService *service.ChatLogService
 }
 
 // NewDingTalkStreamHandler 创建Stream处理器
 func NewDingTalkStreamHandler(cfg *config.Config, cardClient *DingTalkStreamClient, mcpServer *imcp.MCPServer) *DingTalkStreamHandler {
-	handler := &DingTalkStreamHandler{
+	return &DingTalkStreamHandler{
 		config:         cfg,
 		cardClient:     cardClient,
 		mcpServer:      mcpServer,
 		intentParser:   newIntentParser(),
 		chatLogService: service.NewChatLogService(),
 	}
-
-	// 初始化 LLM 客户端
-	// 优先从数据库读取 LLM 配置，如果数据库没有配置则使用 config.yaml
-	configService := service.NewConfigService()
-	dbLLMConfig, err := configService.GetDefaultLLMConfig()
-
-	var llmEnabled bool
-	var llmCfg *llm.Config
-
-	if err == nil && dbLLMConfig != nil && dbLLMConfig.Enabled {
-		// 使用数据库配置
-		llmEnabled = true
-		llmCfg = &llm.Config{
-			Model:   dbLLMConfig.Model,
-			APIKey:  dbLLMConfig.APIKey,
-			BaseURL: dbLLMConfig.BaseURL,
-		}
-		logx.Info("⚗️ Using LLM Config from Database: %s (Model: %s)", dbLLMConfig.Name, dbLLMConfig.Model)
-	} else if cfg.LLM.Enabled {
-		// 降级使用 config.yaml 配置
-		llmEnabled = true
-		llmCfg = &llm.Config{
-			Model:   cfg.LLM.Model,
-			APIKey:  cfg.LLM.APIKey,
-			BaseURL: cfg.LLM.BaseURL,
-		}
-		logx.Info("⚗️ Using LLM Config from config.yaml (Model: %s)", cfg.LLM.Model)
-	}
-
-	if llmEnabled {
-		handler.llmClient = llm.NewClient(llmCfg, mcpServer)
-		logx.Info("⚗️ LLM Client Initialized For DingTalk Stream Handler")
-	}
-
-	return handler
 }
 
 // Start 启动Stream客户端
@@ -140,10 +103,11 @@ func (h *DingTalkStreamHandler) onChatBotMessage(ctx context.Context, data *chat
 		return []byte(""), nil
 	}
 
-	// 如果启用了 LLM,使用 LLM 处理
-	if h.config.LLM.Enabled && h.llmClient != nil {
-		logx.Info("Using LLM to process message")
-		go h.processLLMMessage(ctx, data, content)
+	// 使用新的 Agent 系统处理消息
+	agentSystem := GetGlobalAgent()
+	if agentSystem != nil && agentSystem.StreamHandler != nil {
+		logx.Info("Using Agent system to process message")
+		go h.processAgentMessage(ctx, data, content)
 		return []byte(""), nil
 	}
 
@@ -762,24 +726,20 @@ func (h *DingTalkStreamHandler) sendTextReply(data *chatbot.BotCallbackDataModel
 	logx.Debug("Sent text reply successfully")
 }
 
-// processLLMMessage 使用 LLM 处理消息
-func (h *DingTalkStreamHandler) processLLMMessage(ctx context.Context, data *chatbot.BotCallbackDataModel, userMessage string) {
-	logx.Info("Processing message with LLM, user %s asked: %s", data.SenderNick, userMessage)
+// processAgentMessage 使用 Agent 系统处理消息
+func (h *DingTalkStreamHandler) processAgentMessage(ctx context.Context, data *chatbot.BotCallbackDataModel, userMessage string) {
+	logx.Info("Processing message with Agent system, user %s asked: %s", data.SenderNick, userMessage)
 
 	// 确定消息来源（私聊/群聊）
-	source := "私聊"
+	source := "dingtalk_private"
 	if data.ConversationType == "2" {
-		source = "群聊"
+		source = "dingtalk_group"
 	}
 
-	// 保存用户消息到数据库
+	// 获取用户名
 	username := data.SenderNick
 	if username == "" {
 		username = data.SenderStaffId
-	}
-	userLog, err := h.chatLogService.CreateUserMessage(username, source, userMessage)
-	if err != nil {
-		logx.Error("Failed to save user message to database: %v", err)
 	}
 
 	// 检查是否使用卡片
@@ -790,7 +750,7 @@ func (h *DingTalkStreamHandler) processLLMMessage(ctx context.Context, data *cha
 		trackID = h.generateTrackID(data.MsgId)
 		// 创建卡片
 		if err := h.createCard(ctx, trackID, data); err != nil {
-			logx.Error("Failed to create card for LLM, fallback to text: %v", err)
+			logx.Error("Failed to create card for Agent, fallback to text: %v", err)
 			useCard = false
 		}
 	}
@@ -805,11 +765,33 @@ func (h *DingTalkStreamHandler) processLLMMessage(ctx context.Context, data *cha
 		h.sendTextReply(data, "🤖 正在思考,请稍候...")
 	}
 
-	// 调用 LLM
-	responseCh, err := h.llmClient.ChatWithToolsAndStream(ctx, userMessage)
+	// 获取全局 Agent 系统
+	agentSystem := GetGlobalAgent()
+	if agentSystem == nil || agentSystem.StreamHandler == nil {
+		errorMsg := "❌ Agent 系统未初始化"
+		logx.Error(errorMsg)
+		if useCard {
+			_ = h.cardClient.StreamingUpdate(trackID, fmt.Sprintf("**%s**\n\n%s", userMessage, errorMsg), true)
+		} else {
+			h.sendTextReply(data, errorMsg)
+		}
+		return
+	}
+
+	// 构建 Agent 请求（注意：conversation_id 需要基于 DingTalk conversation_id 管理）
+	// 这里简化处理，使用 0 表示不关联特定会话
+	agentReq := &agent.ChatRequest{
+		Username:       username,
+		Message:        userMessage,
+		ConversationID: 0, // DingTalk 不使用数据库会话管理
+		Source:         source,
+	}
+
+	// 调用 Agent
+	responseCh, err := agentSystem.StreamHandler.ChatStream(ctx, agentReq)
 	if err != nil {
-		logx.Error("Failed to call LLM: %v", err)
-		errorMsg := fmt.Sprintf("❌ LLM 调用失败: %v", err)
+		logx.Error("Failed to call Agent: %v", err)
+		errorMsg := fmt.Sprintf("❌ Agent 调用失败: %v", err)
 
 		if useCard {
 			_ = h.cardClient.StreamingUpdate(trackID, fmt.Sprintf("**%s**\n\n%s", userMessage, errorMsg), true)
@@ -821,19 +803,16 @@ func (h *DingTalkStreamHandler) processLLMMessage(ctx context.Context, data *cha
 
 	// 流式接收响应
 	if useCard {
-		h.streamLLMResponseWithCard(ctx, trackID, userMessage, username, source, userLog, responseCh)
+		h.streamAgentResponseWithCard(ctx, trackID, userMessage, responseCh)
 	} else {
-		h.streamLLMResponseWithText(data, userMessage, username, source, userLog, responseCh)
+		h.streamAgentResponseWithText(data, userMessage, responseCh)
 	}
 }
 
-// streamLLMResponseWithCard 使用卡片流式显示 LLM 响应
-func (h *DingTalkStreamHandler) streamLLMResponseWithCard(ctx context.Context, trackID, question, username, source string, userLog *model.ChatLog, responseCh <-chan string) {
+// streamAgentResponseWithCard 使用卡片流式显示 Agent 响应
+func (h *DingTalkStreamHandler) streamAgentResponseWithCard(ctx context.Context, trackID, question string, responseCh <-chan string) {
 	questionHeader := fmt.Sprintf("**%s**\n\n", question)
 	fullContent := questionHeader
-
-	// 用于收集AI响应（不包含header）
-	var aiResponse strings.Builder
 
 	// 改进的缓冲机制
 	updateBuffer := ""
@@ -850,7 +829,6 @@ func (h *DingTalkStreamHandler) streamLLMResponseWithCard(ctx context.Context, t
 				// 流结束,发送最终更新
 				if updateBuffer != "" {
 					fullContent += updateBuffer
-					aiResponse.WriteString(updateBuffer)
 				}
 				fullContent += fmt.Sprintf("\n\n---\n⏰ %s", time.Now().Format("2006-01-02 15:04:05"))
 
@@ -858,15 +836,8 @@ func (h *DingTalkStreamHandler) streamLLMResponseWithCard(ctx context.Context, t
 					logx.Error("Failed to finalize card: %v", err)
 				}
 
-				// 保存AI响应到数据库
-				if userLog != nil && aiResponse.Len() > 0 {
-					_, err := h.chatLogService.CreateAIMessage(username, source, aiResponse.String(), userLog.ID)
-					if err != nil {
-						logx.Error("Failed to save AI response to database: %v", err)
-					}
-				}
-
-				logx.Info("LLM conversation completed with card")
+				// Agent 已经保存了消息到数据库
+				logx.Info("Agent conversation completed with card")
 				return
 			}
 
@@ -877,7 +848,6 @@ func (h *DingTalkStreamHandler) streamLLMResponseWithCard(ctx context.Context, t
 			// 定时检查是否需要更新
 			if updateBuffer != "" && len(updateBuffer) >= minBufferSize {
 				fullContent += updateBuffer
-				aiResponse.WriteString(updateBuffer)
 				updateBuffer = ""
 
 				// 更新卡片
@@ -889,8 +859,8 @@ func (h *DingTalkStreamHandler) streamLLMResponseWithCard(ctx context.Context, t
 	}
 }
 
-// streamLLMResponseWithText 使用文本消息显示 LLM 响应
-func (h *DingTalkStreamHandler) streamLLMResponseWithText(data *chatbot.BotCallbackDataModel, question, username, source string, userLog *model.ChatLog, responseCh <-chan string) {
+// streamAgentResponseWithText 使用文本消息显示 Agent 响应
+func (h *DingTalkStreamHandler) streamAgentResponseWithText(data *chatbot.BotCallbackDataModel, question string, responseCh <-chan string) {
 	// 累积所有响应
 	var fullResponse strings.Builder
 
@@ -908,13 +878,6 @@ func (h *DingTalkStreamHandler) streamLLMResponseWithText(data *chatbot.BotCallb
 
 	h.sendTextReply(data, result)
 
-	// 保存AI响应到数据库
-	if userLog != nil && aiResponseStr != "" {
-		_, err := h.chatLogService.CreateAIMessage(username, source, aiResponseStr, userLog.ID)
-		if err != nil {
-			logx.Error("Failed to save AI response to database: %v", err)
-		}
-	}
-
-	logx.Info("LLM conversation completed with text")
+	// Agent 已经保存了消息到数据库
+	logx.Info("Agent conversation completed with text")
 }
