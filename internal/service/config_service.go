@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"cnb.cool/zhiqiangwang/pkg/logx"
 	"gorm.io/gorm"
 
 	"github.com/eryajf/zenops/internal/database"
@@ -281,9 +282,27 @@ func (s *ConfigService) UpdateMCPServer(server *model.MCPServer) error {
 	return s.db.Save(server).Error
 }
 
-// DeleteMCPServer 删除MCP服务器
+// DeleteMCPServer 删除MCP服务器及其关联的工具
 func (s *ConfigService) DeleteMCPServer(id uint) error {
-	return s.db.Delete(&model.MCPServer{}, id).Error
+	// 使用事务确保原子性
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// 1. 先删除该 server 关联的所有 tools
+		result := tx.Where("server_id = ?", id).Delete(&model.MCPTool{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected > 0 {
+			logx.Info("Deleted %d tools associated with MCP server ID %d", result.RowsAffected, id)
+		}
+
+		// 2. 再删除 server 本身
+		if err := tx.Delete(&model.MCPServer{}, id).Error; err != nil {
+			return err
+		}
+		logx.Info("Successfully deleted MCP server ID %d", id)
+
+		return nil
+	})
 }
 
 // ========== MCP Tool 配置管理 ==========

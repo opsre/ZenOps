@@ -146,14 +146,54 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 		}
 	}
 
-	// 检查 LLM 配置
-	if !h.config.LLM.Enabled || h.llmClient == nil {
-		c.JSON(http.StatusServiceUnavailable, Response{
-			Code:    503,
-			Message: "LLM service is not enabled",
-		})
-		return
+	// 动态加载 LLM 配置（从数据库）
+	configService := service.NewConfigService()
+	var llmConfig *model.LLMConfig
+	var err error
+
+	// 如果请求中指定了模型ID，尝试从数据库中查找对应的配置
+	if req.Model != "" {
+		// 先尝试按名称查找（Model字段）
+		llmConfigs, err := configService.ListLLMConfigs()
+		if err == nil {
+			for _, cfg := range llmConfigs {
+				if cfg.Model == req.Model && cfg.Enabled {
+					llmConfig = &cfg
+					break
+				}
+			}
+		}
 	}
+
+	// 如果没有找到指定的模型，使用默认的已启用模型
+	if llmConfig == nil {
+		llmConfig, err = configService.GetDefaultLLMConfig()
+		if err != nil {
+			logx.Error("Failed to get default LLM config: %v", err)
+			c.JSON(http.StatusInternalServerError, Response{
+				Code:    500,
+				Message: fmt.Sprintf("Failed to load LLM config: %v", err),
+			})
+			return
+		}
+		if llmConfig == nil {
+			c.JSON(http.StatusServiceUnavailable, Response{
+				Code:    503,
+				Message: "No enabled LLM configuration found. Please configure an LLM model first.",
+			})
+			return
+		}
+	}
+
+	// 使用数据库中的配置创建 LLM 客户端
+	llmClientConfig := &llm.Config{
+		Model:   llmConfig.Model,
+		APIKey:  llmConfig.APIKey,
+		BaseURL: llmConfig.BaseURL,
+	}
+	llmClient := llm.NewClient(llmClientConfig, h.mcpServer)
+
+	logx.Info("Using LLM config: provider=%s, model=%s", llmConfig.Provider, llmConfig.Model)
 
 	// 使用 llm.Client 调用 LLM（支持 MCP 工具）
 	ctx := context.Background()
@@ -169,13 +209,12 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 
 	// 调用 LLM 流式对话（传递完整的消息历史，会自动使用已启用的 MCP 工具）
 	var responseCh <-chan string
-	var err error
 	if len(llmMessages) > 0 {
 		// 使用新方法传递完整的消息历史
-		responseCh, err = h.llmClient.ChatWithToolsAndStreamMessages(ctx, llmMessages)
+		responseCh, err = llmClient.ChatWithToolsAndStreamMessages(ctx, llmMessages)
 	} else {
 		// 降级：如果没有消息历史，使用旧方法
-		responseCh, err = h.llmClient.ChatWithToolsAndStream(ctx, userMessage)
+		responseCh, err = llmClient.ChatWithToolsAndStream(ctx, userMessage)
 	}
 
 	if err != nil {
@@ -366,6 +405,26 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 
 // generateConversationTitle 生成会话标题
 func (h *ChatHandler) generateConversationTitle(ctx context.Context, userMessage string) string {
+	// 从数据库加载 LLM 配置
+	configService := service.NewConfigService()
+	llmConfig, err := configService.GetDefaultLLMConfig()
+	if err != nil || llmConfig == nil {
+		logx.Error("Failed to get default LLM config for title generation: %v", err)
+		// 如果生成失败，使用用户消息的前10个字符作为标题
+		if len(userMessage) > 10 {
+			return userMessage[:10] + "..."
+		}
+		return userMessage
+	}
+
+	// 创建 LLM 客户端
+	llmClientConfig := &llm.Config{
+		Model:   llmConfig.Model,
+		APIKey:  llmConfig.APIKey,
+		BaseURL: llmConfig.BaseURL,
+	}
+	llmClient := llm.NewClient(llmClientConfig, h.mcpServer)
+
 	// 构建生成标题的提示词
 	titlePrompt := fmt.Sprintf(`请根据下面的用户问题，生成一个简短的会话标题（5-15个字）。
 只返回标题文本，不要包含任何其他内容、标点符号或解释。
@@ -375,7 +434,7 @@ func (h *ChatHandler) generateConversationTitle(ctx context.Context, userMessage
 会话标题：`, userMessage)
 
 	// 调用 LLM 生成标题
-	responseCh, err := h.llmClient.ChatWithToolsAndStream(ctx, titlePrompt)
+	responseCh, err := llmClient.ChatWithToolsAndStream(ctx, titlePrompt)
 	if err != nil {
 		logx.Error("Failed to generate conversation title: %v", err)
 		// 如果生成失败，使用用户消息的前10个字符作为标题

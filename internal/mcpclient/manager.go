@@ -115,6 +115,11 @@ func (m *Manager) createClient(cfg *config.MCPServerConfig) (*client.Client, err
 
 // createStdioClient 创建 Stdio 客户端
 func (m *Manager) createStdioClient(cfg *config.MCPServerConfig) (*client.Client, error) {
+	// 验证 command 不能为空
+	if cfg.Command == "" {
+		return nil, fmt.Errorf("stdio MCP server requires a valid command, but got empty string")
+	}
+
 	// 转换环境变量
 	env := make([]string, 0, len(cfg.Env))
 	for k, v := range cfg.Env {
