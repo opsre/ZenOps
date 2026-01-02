@@ -10,6 +10,7 @@ import (
 	"github.com/eryajf/zenops/internal/imcp"
 	"github.com/eryajf/zenops/internal/knowledge"
 	"github.com/eryajf/zenops/internal/memory"
+	"github.com/eryajf/zenops/internal/service"
 	"gorm.io/gorm"
 )
 
@@ -42,7 +43,7 @@ func Initialize(ctx context.Context, db *gorm.DB, mcpServer *imcp.MCPServer, cfg
 	logx.Info("✅ Agent Orchestrator initialized (max_iterations=10)")
 
 	// 4. 初始化 Stream Handler
-	streamHandler, err := initializeStreamHandler(orchestrator, cfg)
+	streamHandler, err := initializeStreamHandler(ctx, db, orchestrator, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize stream handler: %w", err)
 	}
@@ -88,12 +89,34 @@ func initializeMemoryManager(ctx context.Context, db *gorm.DB, cfg *config.Confi
 }
 
 // initializeStreamHandler 初始化流式处理器
-func initializeStreamHandler(orchestrator *Orchestrator, cfg *config.Config) (*StreamHandler, error) {
-	// 构建 Model Config
-	modelConfig := ModelConfig{
-		Model:   cfg.LLM.Model,
-		APIKey:  cfg.LLM.APIKey,
-		BaseURL: cfg.LLM.BaseURL,
+func initializeStreamHandler(ctx context.Context, db *gorm.DB, orchestrator *Orchestrator, cfg *config.Config) (*StreamHandler, error) {
+	// 优先从数据库读取 LLM 配置
+	configService := service.NewConfigService()
+	dbLLMConfig, err := configService.GetDefaultLLMConfig()
+	if err != nil {
+		logx.Warn("⚠️  Failed to load LLM config from database: %v, falling back to config.yaml", err)
+	}
+
+	var modelConfig ModelConfig
+
+	if dbLLMConfig != nil && dbLLMConfig.Enabled {
+		// 使用数据库配置
+		modelConfig = ModelConfig{
+			Model:   dbLLMConfig.Model,
+			APIKey:  dbLLMConfig.APIKey,
+			BaseURL: dbLLMConfig.BaseURL,
+		}
+		logx.Info("📦 Using LLM config from database: provider=%s, model=%s, base_url=%s",
+			dbLLMConfig.Provider, dbLLMConfig.Model, dbLLMConfig.BaseURL)
+	} else {
+		// 回退到 config.yaml
+		modelConfig = ModelConfig{
+			Model:   cfg.LLM.Model,
+			APIKey:  cfg.LLM.APIKey,
+			BaseURL: cfg.LLM.BaseURL,
+		}
+		logx.Info("📦 Using LLM config from config.yaml: model=%s, base_url=%s",
+			cfg.LLM.Model, cfg.LLM.BaseURL)
 	}
 
 	// 创建 Stream Handler
