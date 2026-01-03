@@ -179,3 +179,8 @@ func (o *Orchestrator) chatTypeToRole(chatType int) string {
 		return "system"
 	}
 }
+
+// GetKnowledgeRetriever 获取知识库检索器（供外部使用）
+func (o *Orchestrator) GetKnowledgeRetriever() *knowledge.Retriever {
+	return o.knowledgeRet
+}

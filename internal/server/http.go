@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
+	"github.com/eryajf/zenops/internal/agent"
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/imcp"
 	"github.com/eryajf/zenops/internal/middleware"
@@ -73,6 +74,9 @@ func (s *HTTPGinServer) SetMCPServer(mcpServer *imcp.MCPServer) {
 
 	// 注册 AI 对话路由（需要在 mcpServer 设置后）
 	s.registerChatRoutes()
+
+	// 注册知识库路由
+	s.registerKnowledgeRoutes()
 
 	// 如果启用了企业微信,初始化消息处理器
 	if s.config.Wecom.Enabled {
@@ -368,6 +372,30 @@ func (s *HTTPGinServer) registerServiceRoutes() {
 		services.GET("/status/:platform", serviceHandler.GetPlatformStatus)
 		services.POST("/toggle/:platform", serviceHandler.ToggleIMService)
 	}
+}
+
+// registerKnowledgeRoutes 注册知识库路由
+func (s *HTTPGinServer) registerKnowledgeRoutes() {
+	// 从全局 Agent 获取 KnowledgeRetriever
+	globalAgent := agent.GetGlobalAgent()
+	if globalAgent == nil {
+		logx.Warn("Global Agent is nil, skipping knowledge routes registration")
+		return
+	}
+
+	retriever := globalAgent.Orchestrator.GetKnowledgeRetriever()
+	if retriever == nil {
+		logx.Warn("KnowledgeRetriever is nil, skipping knowledge routes registration")
+		return
+	}
+
+	knowledgeHandler := NewKnowledgeHandler(retriever)
+
+	// 知识库路由
+	v1 := s.engine.Group("/api/v1")
+	knowledgeHandler.RegisterRoutes(v1)
+
+	logx.Info("✅ Knowledge routes registered successfully")
 }
 
 // registerStaticFiles 注册前端静态文件服务
