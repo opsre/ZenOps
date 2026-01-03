@@ -148,7 +148,7 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 		return
 	}
 
-	logx.Info("Calling Agent with conversation_id=%d, username=%s", req.ConversationID, username)
+	logx.Info("✅ Agent stream started: conversation_id=%d, username=%s, stream=%v", req.ConversationID, username, req.Stream)
 
 	// 处理流式响应
 	if req.Stream {
