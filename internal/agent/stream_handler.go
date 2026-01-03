@@ -11,31 +11,43 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/eryajf/zenops/internal/knowledge"
 	"github.com/eryajf/zenops/internal/memory"
+	"github.com/eryajf/zenops/internal/service"
 )
 
 // StreamHandler 流式对话处理器
 type StreamHandler struct {
-	orchestrator *Orchestrator
-	chatModel    model.ChatModel
-	tools        []schema.ToolInfo
+	orchestrator        *Orchestrator
+	fallbackModelConfig ModelConfig // 回退配置（从 config.yaml）
+	tools               []schema.ToolInfo
 }
 
 // NewStreamHandler 创建流式处理器
-func NewStreamHandler(orchestrator *Orchestrator, modelConfig ModelConfig) (*StreamHandler, error) {
-	// 创建 Eino ChatModel (OpenAI 兼容)
-	chatModel, err := openai.NewChatModel(context.Background(), &openai.ChatModelConfig{
-		Model:   modelConfig.Model,
-		APIKey:  modelConfig.APIKey,
-		BaseURL: modelConfig.BaseURL,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create chat model: %w", err)
+func NewStreamHandler(orchestrator *Orchestrator, fallbackModelConfig ModelConfig) (*StreamHandler, error) {
+	return &StreamHandler{
+		orchestrator:        orchestrator,
+		fallbackModelConfig: fallbackModelConfig,
+	}, nil
+}
+
+// getLatestModelConfig 获取最新的 LLM 配置（优先数据库，回退到 config.yaml）
+func (s *StreamHandler) getLatestModelConfig(ctx context.Context) ModelConfig {
+	// 尝试从数据库读取配置
+	configService := service.NewConfigService()
+	dbLLMConfig, err := configService.GetDefaultLLMConfig()
+
+	if err == nil && dbLLMConfig != nil && dbLLMConfig.Enabled {
+		logx.Debug("Using LLM config from database: provider=%s, model=%s",
+			dbLLMConfig.Provider, dbLLMConfig.Model)
+		return ModelConfig{
+			Model:   dbLLMConfig.Model,
+			APIKey:  dbLLMConfig.APIKey,
+			BaseURL: dbLLMConfig.BaseURL,
+		}
 	}
 
-	return &StreamHandler{
-		orchestrator: orchestrator,
-		chatModel:    chatModel,
-	}, nil
+	// 回退到 config.yaml
+	logx.Debug("Using fallback LLM config from config.yaml")
+	return s.fallbackModelConfig
 }
 
 // ChatStream 流式对话（兼容现有接口）
@@ -45,15 +57,22 @@ func (s *StreamHandler) ChatStream(ctx context.Context, req *ChatRequest) (<-cha
 	go func() {
 		defer close(responseCh)
 
-		// 1. 检查 QA 缓存
-		cachedAnswer, hit, err := s.orchestrator.memoryMgr.GetCachedAnswer(req.Username, req.Message)
-		if err == nil && hit {
-			logx.Info("✅ QA cache hit, returning cached answer")
+		// 1. 检查语义缓存（优先）
+		if cachedAnswer, hit, err := s.orchestrator.memoryMgr.GetSemanticCachedAnswer(ctx, req.Username, req.Message); err == nil && hit {
+			logx.Info("✅ Semantic cache hit, returning cached answer")
 			responseCh <- cachedAnswer
 			return
 		}
 
-		// 2. 加载对话历史
+		// 2. 检查精确匹配缓存
+		cachedAnswer, hit, err := s.orchestrator.memoryMgr.GetCachedAnswer(req.Username, req.Message)
+		if err == nil && hit {
+			logx.Info("✅ Exact cache hit, returning cached answer")
+			responseCh <- cachedAnswer
+			return
+		}
+
+		// 3. 加载对话历史
 		chatLogs, err := s.orchestrator.memoryMgr.GetConversationHistory(req.ConversationID, 10)
 		if err != nil {
 			logx.Warn("Failed to load conversation history: %v", err)
@@ -69,13 +88,13 @@ func (s *StreamHandler) ChatStream(ctx context.Context, req *ChatRequest) (<-cha
 			})
 		}
 
-		// 3. 加载用户上下文
+		// 4. 加载用户上下文
 		userCtx, err := s.orchestrator.memoryMgr.GetUserContext(req.Username)
 		if err != nil {
 			logx.Warn("Failed to load user context: %v", err)
 		}
 
-		// 4. 检索知识库
+		// 5. 检索知识库
 		var knowledgeDocs []*knowledge.Document
 		if s.orchestrator.knowledgeRet != nil {
 			knowledgeDocs, err = s.orchestrator.knowledgeRet.Retrieve(ctx, req.Message)
@@ -84,7 +103,7 @@ func (s *StreamHandler) ChatStream(ctx context.Context, req *ChatRequest) (<-cha
 			}
 		}
 
-		// 5. 构建 MCP 工具列表
+		// 6. 构建 MCP 工具列表
 		tools, err := s.buildMCPToolInfos(req.Username)
 		if err != nil {
 			logx.Warn("Failed to build MCP tools: %v", err)
@@ -92,13 +111,13 @@ func (s *StreamHandler) ChatStream(ctx context.Context, req *ChatRequest) (<-cha
 		}
 		s.tools = tools
 
-		// 6. 构建消息
+		// 7. 构建消息
 		messages := s.buildMessages(history, userCtx, knowledgeDocs, req.Message)
 
-		// 7. 执行推理循环（支持多轮工具调用）
+		// 8. 执行推理循环（支持多轮工具调用）
 		fullResponse := s.executeLLMWithTools(ctx, messages, req.Username, responseCh)
 
-		// 8. 保存消息到历史
+		// 9. 保存消息到历史
 		if err := s.orchestrator.memoryMgr.SaveMessage(req.ConversationID, 1, req.Message, req.Username); err != nil {
 			logx.Warn("Failed to save user message: %v", err)
 		}
@@ -106,8 +125,8 @@ func (s *StreamHandler) ChatStream(ctx context.Context, req *ChatRequest) (<-cha
 			logx.Warn("Failed to save assistant message: %v", err)
 		}
 
-		// 9. 更新 QA 缓存
-		if err := s.orchestrator.memoryMgr.UpdateQACache(req.Username, req.Message, fullResponse); err != nil {
+		// 10. 更新 QA 缓存（包含语义向量）
+		if err := s.orchestrator.memoryMgr.UpdateQACache(ctx, req.Username, req.Message, fullResponse); err != nil {
 			logx.Warn("Failed to update QA cache: %v", err)
 		}
 	}()
@@ -122,6 +141,22 @@ func (s *StreamHandler) executeLLMWithTools(
 	username string,
 	responseCh chan<- string,
 ) string {
+	// 🔄 动态获取最新 LLM 配置
+	modelConfig := s.getLatestModelConfig(ctx)
+
+	// 创建 ChatModel
+	chatModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
+		Model:   modelConfig.Model,
+		APIKey:  modelConfig.APIKey,
+		BaseURL: modelConfig.BaseURL,
+	})
+	if err != nil {
+		errMsg := fmt.Sprintf("❌ Failed to create chat model: %v", err)
+		responseCh <- errMsg
+		logx.Error(errMsg)
+		return errMsg
+	}
+
 	var fullResponse strings.Builder
 	maxIterations := s.orchestrator.maxIterations
 
@@ -144,7 +179,7 @@ func (s *StreamHandler) executeLLMWithTools(
 		}
 
 		// 调用 ChatModel (流式)
-		streamReader, err := s.chatModel.Stream(ctx, messages, opts...)
+		streamReader, err := chatModel.Stream(ctx, messages, opts...)
 		if err != nil {
 			errMsg := fmt.Sprintf("❌ LLM 调用失败: %v", err)
 			responseCh <- errMsg

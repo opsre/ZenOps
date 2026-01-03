@@ -28,7 +28,7 @@ func Initialize(ctx context.Context, db *gorm.DB, mcpServer *imcp.MCPServer, cfg
 	logx.Info("🤖 Initializing Agent System...")
 
 	// 1. 初始化 Memory Manager
-	memoryMgr, err := initializeMemoryManager(ctx, db, cfg)
+	memoryMgr, embeddingService, err := initializeMemoryManager(ctx, db, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize memory manager: %w", err)
 	}
@@ -36,7 +36,12 @@ func Initialize(ctx context.Context, db *gorm.DB, mcpServer *imcp.MCPServer, cfg
 
 	// 2. 初始化 Knowledge Retriever
 	knowledgeRet := knowledge.NewRetriever(db, false, 3)
-	logx.Info("✅ Knowledge Retriever initialized (FTS5 mode, max_results=3)")
+	// 如果有 embedding service，启用向量检索
+	if embeddingService != nil {
+		knowledgeRet.SetEmbeddingService(embeddingService)
+	} else {
+		logx.Info("✅ Knowledge Retriever initialized (FTS5 mode only, max_results=3)")
+	}
 
 	// 3. 初始化 Agent Orchestrator
 	orchestrator := NewOrchestrator(memoryMgr, knowledgeRet, mcpServer)
@@ -61,7 +66,7 @@ func Initialize(ctx context.Context, db *gorm.DB, mcpServer *imcp.MCPServer, cfg
 }
 
 // initializeMemoryManager 初始化内存管理器
-func initializeMemoryManager(ctx context.Context, db *gorm.DB, cfg *config.Config) (*memory.Manager, error) {
+func initializeMemoryManager(ctx context.Context, db *gorm.DB, cfg *config.Config) (*memory.Manager, *memory.EmbeddingService, error) {
 	var redisCache *memory.RedisCache
 
 	// 检查是否启用 Redis
@@ -83,44 +88,75 @@ func initializeMemoryManager(ctx context.Context, db *gorm.DB, cfg *config.Confi
 		}
 	}
 
+	// 初始化 Embedding 服务（如果启用语义缓存）
+	var embeddingService *memory.EmbeddingService
+	var semanticConfig *memory.SemanticCacheConfig
+
+	if cfg.SemanticCache.Enabled {
+		logx.Info("📦 Initializing Semantic Cache...")
+
+		// 从数据库获取 Embedding 模型配置
+		configService := service.NewConfigService()
+		embConfig, err := configService.GetDefaultEmbeddingConfig()
+
+		if err != nil || embConfig == nil {
+			logx.Warn("⚠️ No embedding model configured, semantic cache disabled")
+		} else {
+			embeddingService, err = memory.NewEmbeddingService(&memory.EmbeddingConfig{
+				APIKey:  embConfig.APIKey,
+				BaseURL: embConfig.BaseURL,
+				Model:   embConfig.Model,
+			}, redisCache)
+
+			if err != nil {
+				logx.Warn("⚠️ Failed to init embedding service: %v, semantic cache disabled", err)
+				embeddingService = nil
+			} else {
+				logx.Info("✅ Embedding service initialized: model=%s", embConfig.Model)
+			}
+		}
+
+		// 设置语义缓存配置
+		threshold := cfg.SemanticCache.SimilarityThreshold
+		if threshold <= 0 {
+			threshold = 0.85 // 默认阈值
+		}
+		maxCandidates := cfg.SemanticCache.MaxCandidates
+		if maxCandidates <= 0 {
+			maxCandidates = 100 // 默认候选数
+		}
+
+		semanticConfig = &memory.SemanticCacheConfig{
+			Enabled:             embeddingService != nil,
+			SimilarityThreshold: threshold,
+			MaxCandidates:       maxCandidates,
+		}
+
+		if semanticConfig.Enabled {
+			logx.Info("✅ Semantic cache enabled: threshold=%.2f, max_candidates=%d",
+				semanticConfig.SimilarityThreshold, semanticConfig.MaxCandidates)
+		}
+	}
+
 	// 创建 Memory Manager
-	memoryMgr := memory.NewManager(db, redisCache)
-	return memoryMgr, nil
+	memoryMgr := memory.NewManager(db, redisCache, embeddingService, semanticConfig)
+	return memoryMgr, embeddingService, nil
 }
 
 // initializeStreamHandler 初始化流式处理器
 func initializeStreamHandler(ctx context.Context, db *gorm.DB, orchestrator *Orchestrator, cfg *config.Config) (*StreamHandler, error) {
-	// 优先从数据库读取 LLM 配置
-	configService := service.NewConfigService()
-	dbLLMConfig, err := configService.GetDefaultLLMConfig()
-	if err != nil {
-		logx.Warn("⚠️  Failed to load LLM config from database: %v, falling back to config.yaml", err)
+	// 使用 config.yaml 作为回退配置
+	// StreamHandler 会在每次对话时动态读取数据库配置
+	fallbackModelConfig := ModelConfig{
+		Model:   cfg.LLM.Model,
+		APIKey:  cfg.LLM.APIKey,
+		BaseURL: cfg.LLM.BaseURL,
 	}
+	logx.Info("📦 LLM fallback config from config.yaml: model=%s, base_url=%s",
+		cfg.LLM.Model, cfg.LLM.BaseURL)
 
-	var modelConfig ModelConfig
-
-	if dbLLMConfig != nil && dbLLMConfig.Enabled {
-		// 使用数据库配置
-		modelConfig = ModelConfig{
-			Model:   dbLLMConfig.Model,
-			APIKey:  dbLLMConfig.APIKey,
-			BaseURL: dbLLMConfig.BaseURL,
-		}
-		logx.Info("📦 Using LLM config from database: provider=%s, model=%s, base_url=%s",
-			dbLLMConfig.Provider, dbLLMConfig.Model, dbLLMConfig.BaseURL)
-	} else {
-		// 回退到 config.yaml
-		modelConfig = ModelConfig{
-			Model:   cfg.LLM.Model,
-			APIKey:  cfg.LLM.APIKey,
-			BaseURL: cfg.LLM.BaseURL,
-		}
-		logx.Info("📦 Using LLM config from config.yaml: model=%s, base_url=%s",
-			cfg.LLM.Model, cfg.LLM.BaseURL)
-	}
-
-	// 创建 Stream Handler
-	streamHandler, err := NewStreamHandler(orchestrator, modelConfig)
+	// 创建 Stream Handler（会在每次对话时动态读取最新配置）
+	streamHandler, err := NewStreamHandler(orchestrator, fallbackModelConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stream handler: %w", err)
 	}

@@ -2,16 +2,17 @@ package config
 
 // Config 应用配置
 type Config struct {
-	Server           ServerConfig    `mapstructure:"server"`
-	Providers        ProvidersConfig `mapstructure:"providers"`
-	CICD             CICDConfig      `mapstructure:"cicd"`
-	DingTalk         DingTalkConfig  `mapstructure:"dingtalk"`
-	Feishu           FeishuConfig    `mapstructure:"feishu"`
-	Wecom            WecomConfig     `mapstructure:"wecom"`
-	LLM              LLMConfig       `mapstructure:"llm"`
-	Auth             AuthConfig      `mapstructure:"auth"`
-	Cache            CacheConfig     `mapstructure:"cache"`
-	MCPServersConfig string          `mapstructure:"mcp_servers_config"` // 外部 MCP Servers 配置文件路径
+	Server           ServerConfig        `mapstructure:"server"`
+	Providers        ProvidersConfig     `mapstructure:"providers"`
+	CICD             CICDConfig          `mapstructure:"cicd"`
+	DingTalk         DingTalkConfig      `mapstructure:"dingtalk"`
+	Feishu           FeishuConfig        `mapstructure:"feishu"`
+	Wecom            WecomConfig         `mapstructure:"wecom"`
+	LLM              LLMConfig           `mapstructure:"llm"`
+	Auth             AuthConfig          `mapstructure:"auth"`
+	Cache            CacheConfig         `mapstructure:"cache"`
+	SemanticCache    SemanticCacheConfig `mapstructure:"semantic_cache"`
+	MCPServersConfig string              `mapstructure:"mcp_servers_config"` // 外部 MCP Servers 配置文件路径
 }
 
 // ProvidersConfig 云服务提供商配置集合
@@ -117,6 +118,13 @@ type RedisConfig struct {
 	Password string `mapstructure:"password"`
 	DB       int    `mapstructure:"db"`
 	PoolSize int    `mapstructure:"pool_size"` // 连接池大小
+}
+
+// SemanticCacheConfig 语义缓存配置
+type SemanticCacheConfig struct {
+	Enabled             bool    `mapstructure:"enabled"`              // 是否启用语义缓存
+	SimilarityThreshold float64 `mapstructure:"similarity_threshold"` // 相似度阈值，默认 0.85
+	MaxCandidates       int     `mapstructure:"max_candidates"`       // 最大候选数量，默认 100
 }
 
 var globalConfig *Config

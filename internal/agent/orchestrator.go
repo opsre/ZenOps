@@ -33,18 +33,27 @@ func NewOrchestrator(
 	}
 }
 
-// Execute 执行对话（简化版，未使用 Eino Graph）
+// Execute 执行对话（简化版，未实现 LLM 调用）
+// 注意: 此方法为占位实现，实际对话使用 StreamHandler.ChatStream
+// 主要原因: 当前系统设计为流式优先，非流式场景可通过 StreamHandler 收集完整响应实现
 func (o *Orchestrator) Execute(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
-	logx.Info("🚀 Agent executing request from user: %s", req.Username)
+	logx.Warn("⚠️ Orchestrator.Execute 被调用，但此方法未实现 LLM 调用")
+	logx.Warn("⚠️ 建议使用 StreamHandler.ChatStream 进行对话")
 
-	// 1. 检查 QA 缓存
-	cachedAnswer, hit, err := o.memoryMgr.GetCachedAnswer(req.Username, req.Message)
-	if err == nil && hit {
-		logx.Info("✅ QA cache hit, returning cached answer")
+	// 1. 检查语义缓存（优先）
+	if cachedAnswer, hit, err := o.memoryMgr.GetSemanticCachedAnswer(ctx, req.Username, req.Message); err == nil && hit {
+		logx.Info("✅ Semantic cache hit, returning cached answer")
 		return &ChatResponse{Content: cachedAnswer}, nil
 	}
 
-	// 2. 加载对话历史
+	// 2. 检查精确匹配缓存
+	cachedAnswer, hit, err := o.memoryMgr.GetCachedAnswer(req.Username, req.Message)
+	if err == nil && hit {
+		logx.Info("✅ Exact cache hit, returning cached answer")
+		return &ChatResponse{Content: cachedAnswer}, nil
+	}
+
+	// 3. 加载对话历史
 	chatLogs, err := o.memoryMgr.GetConversationHistory(req.ConversationID, 10)
 	if err != nil {
 		logx.Warn("Failed to load conversation history: %v", err)
@@ -61,13 +70,13 @@ func (o *Orchestrator) Execute(ctx context.Context, req *ChatRequest) (*ChatResp
 	}
 	logx.Debug("Loaded %d messages from conversation history", len(history))
 
-	// 3. 加载用户上下文
+	// 4. 加载用户上下文
 	userCtx, err := o.memoryMgr.GetUserContext(req.Username)
 	if err != nil {
 		logx.Warn("Failed to load user context: %v", err)
 	}
 
-	// 4. 检索知识库
+	// 5. 检索知识库
 	var knowledgeDocs []*knowledge.Document
 	if o.knowledgeRet != nil {
 		knowledgeDocs, err = o.knowledgeRet.Retrieve(ctx, req.Message)
@@ -78,29 +87,15 @@ func (o *Orchestrator) Execute(ctx context.Context, req *ChatRequest) (*ChatResp
 		}
 	}
 
-	// 5. 构建消息（暂时保留，但不使用 - 用于未来的完整 Eino Graph 实现）
+	// 6. 构建消息（用于准备数据）
 	_ = o.buildMessages(history, userCtx, knowledgeDocs, req.Message)
 
-	// 6. 执行推理循环（简化版）
-	// TODO: 替换为 Eino Graph 实现
+	// 7. 返回占位响应
 	response := &ChatResponse{
-		Content: "（简化版 Agent）您的消息已收到，完整的 Eino 集成正在开发中...",
+		Content: "Orchestrator.Execute 未实现。请使用 StreamHandler.ChatStream 进行对话。",
 	}
 
-	// 7. 保存消息到历史
-	if err := o.memoryMgr.SaveMessage(req.ConversationID, 1, req.Message, req.Username); err != nil {
-		logx.Warn("Failed to save user message: %v", err)
-	}
-	if err := o.memoryMgr.SaveMessage(req.ConversationID, 2, response.Content, req.Username); err != nil {
-		logx.Warn("Failed to save assistant message: %v", err)
-	}
-
-	// 8. 更新 QA 缓存
-	if err := o.memoryMgr.UpdateQACache(req.Username, req.Message, response.Content); err != nil {
-		logx.Warn("Failed to update QA cache: %v", err)
-	}
-
-	logx.Info("✅ Agent execution completed")
+	logx.Info("✅ Orchestrator.Execute completed (placeholder only)")
 	return response, nil
 }
 

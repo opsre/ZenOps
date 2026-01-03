@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"cnb.cool/zhiqiangwang/pkg/logx"
 	"github.com/eryajf/zenops/internal/model"
@@ -12,9 +13,16 @@ import (
 
 // Retriever 知识检索器
 type Retriever struct {
-	db         *gorm.DB
-	useVector  bool // 是否启用向量检索（暂未实现）
-	maxResults int  // 最大返回结果数
+	db               *gorm.DB
+	useVector        bool // 是否启用向量检索
+	maxResults       int  // 最大返回结果数
+	embeddingService EmbeddingService
+}
+
+// EmbeddingService 简化接口（避免循环依赖）
+type EmbeddingService interface {
+	Embed(ctx context.Context, text string) ([]float64, error)
+	GetModel() string
 }
 
 // NewRetriever 创建知识检索器
@@ -30,15 +38,36 @@ func NewRetriever(db *gorm.DB, useVector bool, maxResults int) *Retriever {
 	}
 }
 
+// SetEmbeddingService 设置 Embedding 服务（用于向量检索）
+func (r *Retriever) SetEmbeddingService(service EmbeddingService) {
+	r.embeddingService = service
+	if service != nil {
+		r.useVector = true
+		logx.Info("✅ Knowledge Retriever: Vector search enabled with model %s", service.GetModel())
+	}
+}
+
 // Retrieve 检索相关文档（实现 Eino Retriever 接口）
 func (r *Retriever) Retrieve(ctx context.Context, query string) ([]*Document, error) {
-	// 目前只实现 FTS5 全文检索
-	// TODO: 未来可以添加向量检索
+	// 根据配置选择检索策略
+	if r.useVector && r.embeddingService != nil {
+		// 使用混合检索（FTS5 + 向量）
+		return r.retrieveHybrid(ctx, query)
+	}
+
+	// 仅使用 FTS5 全文检索
 	return r.retrieveByFTS5(query)
 }
 
 // retrieveByFTS5 使用 FTS5 全文检索
 func (r *Retriever) retrieveByFTS5(query string) ([]*Document, error) {
+	// 清理查询文本，移除 FTS5 特殊字符
+	cleanedQuery := sanitizeFTS5Query(query)
+	if cleanedQuery == "" {
+		logx.Warn("FTS5 query is empty after sanitization, original: %s", query)
+		return []*Document{}, nil
+	}
+
 	// FTS5 查询语法
 	sql := `
 		SELECT
@@ -67,7 +96,7 @@ func (r *Retriever) retrieveByFTS5(query string) ([]*Document, error) {
 		Score    float64 `gorm:"column:score"`
 	}
 
-	if err := r.db.Raw(sql, query, r.maxResults).Scan(&results).Error; err != nil {
+	if err := r.db.Raw(sql, cleanedQuery, r.maxResults).Scan(&results).Error; err != nil {
 		return nil, fmt.Errorf("FTS5 search failed: %w", err)
 	}
 
@@ -100,6 +129,11 @@ func (r *Retriever) retrieveByFTS5(query string) ([]*Document, error) {
 
 // AddDocument 添加文档到知识库
 func (r *Retriever) AddDocument(req *AddDocumentRequest) (uint, error) {
+	return r.AddDocumentWithContext(context.Background(), req)
+}
+
+// AddDocumentWithContext 添加文档到知识库（支持 context）
+func (r *Retriever) AddDocumentWithContext(ctx context.Context, req *AddDocumentRequest) (uint, error) {
 	// 序列化 metadata
 	metadataJSON, err := json.Marshal(req.Metadata)
 	if err != nil {
@@ -115,11 +149,27 @@ func (r *Retriever) AddDocument(req *AddDocumentRequest) (uint, error) {
 		Enabled:  true,
 	}
 
+	// 如果启用向量检索，生成 embedding
+	if r.useVector && r.embeddingService != nil {
+		// 合并标题和内容生成向量
+		text := req.Title + "\n\n" + req.Content
+		embedding, err := r.embeddingService.Embed(ctx, text)
+		if err != nil {
+			logx.Warn("Failed to generate embedding for document: %v", err)
+		} else {
+			embBytes, _ := json.Marshal(embedding)
+			doc.Embedding = string(embBytes)
+			doc.EmbeddingModel = r.embeddingService.GetModel()
+			logx.Debug("Generated embedding for document: model=%s, dim=%d", doc.EmbeddingModel, len(embedding))
+		}
+	}
+
 	if err := r.db.Create(doc).Error; err != nil {
 		return 0, fmt.Errorf("failed to create document: %w", err)
 	}
 
-	logx.Info("✅ Added document to knowledge base: %s (ID: %d)", doc.Title, doc.ID)
+	logx.Info("✅ Added document to knowledge base: %s (ID: %d, has_embedding=%v)",
+		doc.Title, doc.ID, doc.Embedding != "")
 	return doc.ID, nil
 }
 
@@ -288,4 +338,25 @@ func (r *Retriever) GetStats() (map[string]any, error) {
 		"enabled_count": enabledCount,
 		"categories":    categories,
 	}, nil
+}
+
+// sanitizeFTS5Query 清理 FTS5 查询文本，移除特殊字符
+func sanitizeFTS5Query(query string) string {
+	// FTS5 特殊字符: " * : ( ) AND OR NOT
+	// 简单策略：只保留字母、数字、中文、空格
+	var result []rune
+	for _, r := range query {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || // 字母
+			(r >= '0' && r <= '9') || // 数字
+			(r >= 0x4e00 && r <= 0x9fa5) || // 中文
+			r == ' ' { // 空格
+			result = append(result, r)
+		}
+	}
+
+	// 去除首尾空格，压缩多个空格为一个
+	cleaned := strings.TrimSpace(string(result))
+	cleaned = strings.Join(strings.Fields(cleaned), " ")
+
+	return cleaned
 }

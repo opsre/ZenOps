@@ -221,3 +221,36 @@ func (r *RedisCache) SetActiveSession(username string, conversationID uint) erro
 func (r *RedisCache) Close() error {
 	return r.client.Close()
 }
+
+// GetEmbedding 获取缓存的 Embedding 向量
+func (r *RedisCache) GetEmbedding(key string) ([]float64, error) {
+	ctx := context.Background()
+
+	data, err := r.client.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return nil, nil // 缓存未命中
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var vector []float64
+	if err := json.Unmarshal([]byte(data), &vector); err != nil {
+		return nil, err
+	}
+
+	return vector, nil
+}
+
+// SetEmbedding 设置缓存的 Embedding 向量
+func (r *RedisCache) SetEmbedding(key string, vector []float64) error {
+	ctx := context.Background()
+
+	data, err := json.Marshal(vector)
+	if err != nil {
+		return err
+	}
+
+	// Embedding 缓存使用较长的 TTL（7 天）
+	return r.client.Set(ctx, key, data, 7*24*time.Hour).Err()
+}

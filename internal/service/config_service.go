@@ -94,10 +94,26 @@ func (s *ConfigService) GetEnabledLLMConfigs() ([]model.LLMConfig, error) {
 	return configs, err
 }
 
-// GetDefaultLLMConfig 获取默认LLM配置（第一个启用的配置）
+// GetDefaultLLMConfig 获取默认LLM配置（第一个启用的 chat 类型配置）
 func (s *ConfigService) GetDefaultLLMConfig() (*model.LLMConfig, error) {
 	var config model.LLMConfig
-	err := s.db.Where("enabled = ?", true).Order("id").First(&config).Error
+	// 优先查找 config_type = 'chat' 的配置，兼容旧数据（config_type 为空）
+	err := s.db.Where("enabled = ? AND (config_type = ? OR config_type = '' OR config_type IS NULL)", true, "chat").
+		Order("id").First(&config).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &config, nil
+}
+
+// GetDefaultEmbeddingConfig 获取默认 Embedding 配置（第一个启用的 embedding 类型配置）
+func (s *ConfigService) GetDefaultEmbeddingConfig() (*model.LLMConfig, error) {
+	var config model.LLMConfig
+	err := s.db.Where("enabled = ? AND config_type = ?", true, "embedding").
+		Order("id").First(&config).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil

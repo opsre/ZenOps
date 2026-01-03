@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -14,15 +15,19 @@ import (
 
 // Manager Memory Manager 核心
 type Manager struct {
-	db    *gorm.DB
-	redis *RedisCache // 可选的 Redis 缓存
+	db               *gorm.DB
+	redis            *RedisCache          // 可选的 Redis 缓存
+	embeddingService *EmbeddingService    // 可选的 Embedding 服务
+	semanticConfig   *SemanticCacheConfig // 语义缓存配置
 }
 
 // NewManager 创建 Memory Manager
-func NewManager(db *gorm.DB, redis *RedisCache) *Manager {
+func NewManager(db *gorm.DB, redis *RedisCache, embeddingService *EmbeddingService, semanticConfig *SemanticCacheConfig) *Manager {
 	return &Manager{
-		db:    db,
-		redis: redis,
+		db:               db,
+		redis:            redis,
+		embeddingService: embeddingService,
+		semanticConfig:   semanticConfig,
 	}
 }
 
@@ -211,8 +216,8 @@ func (m *Manager) GetCachedAnswer(username, question string) (string, bool, erro
 	return cache.Answer, true, nil
 }
 
-// UpdateQACache 更新问答缓存
-func (m *Manager) UpdateQACache(username, question, answer string) error {
+// UpdateQACache 更新问答缓存（支持语义缓存）
+func (m *Manager) UpdateQACache(ctx context.Context, username, question, answer string) error {
 	// 检查答案质量 - 不缓存错误响应
 	if m.isErrorResponse(answer) {
 		logx.Debug("Skipping QA cache for error response")
@@ -227,24 +232,49 @@ func (m *Manager) UpdateQACache(username, question, answer string) error {
 
 	hash := m.calculateQuestionHash(question)
 
+	// 生成 Embedding（如果服务可用）
+	var embeddingJSON string
+	var embeddingModel string
+
+	if m.embeddingService != nil && m.semanticConfig != nil && m.semanticConfig.Enabled {
+		embedding, err := m.embeddingService.Embed(ctx, question)
+		if err != nil {
+			logx.Warn("Failed to generate embedding: %v", err)
+			// 继续保存，只是没有向量
+		} else {
+			// 序列化为 JSON
+			embBytes, _ := json.Marshal(embedding)
+			embeddingJSON = string(embBytes)
+			embeddingModel = m.embeddingService.GetModel()
+			logx.Debug("Generated embedding: model=%s, dim=%d", embeddingModel, len(embedding))
+		}
+	}
+
 	// 1. 更新 SQLite
 	cache := &model.QACache{
-		QuestionHash: hash,
-		Question:     question,
-		Answer:       answer,
-		Username:     username,
-		HitCount:     1,
-		LastHitAt:    time.Now(),
+		QuestionHash:   hash,
+		Question:       question,
+		Answer:         answer,
+		Username:       username,
+		Embedding:      embeddingJSON,
+		EmbeddingModel: embeddingModel,
+		HitCount:       1,
+		LastHitAt:      time.Now(),
 	}
 
 	// Upsert
 	if err := m.db.Where("question_hash = ? AND username = ?", hash, username).
-		Assign(model.QACache{Answer: answer, UpdatedAt: time.Now()}).
+		Assign(model.QACache{
+			Answer:         answer,
+			Embedding:      embeddingJSON,
+			EmbeddingModel: embeddingModel,
+			UpdatedAt:      time.Now(),
+		}).
 		FirstOrCreate(cache).Error; err != nil {
 		return fmt.Errorf("failed to update QA cache: %w", err)
 	}
 
-	logx.Debug("✅ QA cache saved: question_hash=%s", hash[:8])
+	logx.Debug("✅ QA cache saved: question_hash=%s, has_embedding=%v", hash[:8], embeddingJSON != "")
 
 	// 2. 更新 Redis
 	if m.redis != nil {
