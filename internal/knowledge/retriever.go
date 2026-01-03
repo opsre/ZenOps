@@ -76,6 +76,7 @@ func (r *Retriever) retrieveByFTS5(query string) ([]*Document, error) {
 			d.content,
 			d.doc_type,
 			d.category,
+			d.tags,
 			d.metadata,
 			rank AS score
 		FROM knowledge_documents d
@@ -92,6 +93,7 @@ func (r *Retriever) retrieveByFTS5(query string) ([]*Document, error) {
 		Content  string  `gorm:"column:content"`
 		DocType  string  `gorm:"column:doc_type"`
 		Category string  `gorm:"column:category"`
+		Tags     string  `gorm:"column:tags"`
 		Metadata string  `gorm:"column:metadata"`
 		Score    float64 `gorm:"column:score"`
 	}
@@ -111,12 +113,20 @@ func (r *Retriever) retrieveByFTS5(query string) ([]*Document, error) {
 			Category: res.Category,
 			Score:    res.Score,
 			Metadata: make(map[string]string),
+			Tags:     []string{},
 		}
 
 		// 解析 JSON metadata
 		if res.Metadata != "" {
 			if err := json.Unmarshal([]byte(res.Metadata), &doc.Metadata); err != nil {
 				logx.Warn("Failed to parse metadata for doc %d: %v", res.ID, err)
+			}
+		}
+
+		// 解析 JSON tags
+		if res.Tags != "" {
+			if err := json.Unmarshal([]byte(res.Tags), &doc.Tags); err != nil {
+				logx.Warn("Failed to parse tags for doc %d: %v", res.ID, err)
 			}
 		}
 
@@ -140,11 +150,18 @@ func (r *Retriever) AddDocumentWithContext(ctx context.Context, req *AddDocument
 		return 0, fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
+	// 序列化 tags
+	tagsJSON, err := json.Marshal(req.Tags)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal tags: %w", err)
+	}
+
 	doc := &model.KnowledgeDocument{
 		Title:    req.Title,
 		Content:  req.Content,
 		DocType:  req.DocType,
 		Category: req.Category,
+		Tags:     string(tagsJSON),
 		Metadata: string(metadataJSON),
 		Enabled:  true,
 	}
@@ -195,11 +212,17 @@ func (r *Retriever) UpdateDocument(docID uint, req *AddDocumentRequest) error {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
+	tagsJSON, err := json.Marshal(req.Tags)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tags: %w", err)
+	}
+
 	updates := map[string]any{
 		"title":    req.Title,
 		"content":  req.Content,
 		"doc_type": req.DocType,
 		"category": req.Category,
+		"tags":     string(tagsJSON),
 		"metadata": string(metadataJSON),
 	}
 
@@ -237,17 +260,27 @@ func (r *Retriever) ListDocuments(category string, enabled *bool) ([]*Document, 
 	var documents []*Document
 	for _, doc := range docs {
 		d := &Document{
-			ID:       doc.ID,
-			Title:    doc.Title,
-			Content:  doc.Content,
-			DocType:  doc.DocType,
-			Category: doc.Category,
-			Metadata: make(map[string]string),
+			ID:        doc.ID,
+			Title:     doc.Title,
+			Content:   doc.Content,
+			DocType:   doc.DocType,
+			Category:  doc.Category,
+			Enabled:   doc.Enabled,
+			CreatedAt: doc.CreatedAt.Format("2006-01-02 15:04:05"),
+			UpdatedAt: doc.UpdatedAt.Format("2006-01-02 15:04:05"),
+			Metadata:  make(map[string]string),
+			Tags:      []string{},
 		}
 
 		if doc.Metadata != "" {
 			if err := json.Unmarshal([]byte(doc.Metadata), &d.Metadata); err != nil {
 				logx.Warn("Failed to parse metadata for doc %d: %v", doc.ID, err)
+			}
+		}
+
+		if doc.Tags != "" {
+			if err := json.Unmarshal([]byte(doc.Tags), &d.Tags); err != nil {
+				logx.Warn("Failed to parse tags for doc %d: %v", doc.ID, err)
 			}
 		}
 
@@ -268,17 +301,27 @@ func (r *Retriever) GetDocumentByID(docID uint) (*Document, error) {
 	}
 
 	d := &Document{
-		ID:       doc.ID,
-		Title:    doc.Title,
-		Content:  doc.Content,
-		DocType:  doc.DocType,
-		Category: doc.Category,
-		Metadata: make(map[string]string),
+		ID:        doc.ID,
+		Title:     doc.Title,
+		Content:   doc.Content,
+		DocType:   doc.DocType,
+		Category:  doc.Category,
+		Enabled:   doc.Enabled,
+		CreatedAt: doc.CreatedAt.Format("2006-01-02 15:04:05"),
+		UpdatedAt: doc.UpdatedAt.Format("2006-01-02 15:04:05"),
+		Metadata:  make(map[string]string),
+		Tags:      []string{},
 	}
 
 	if doc.Metadata != "" {
 		if err := json.Unmarshal([]byte(doc.Metadata), &d.Metadata); err != nil {
 			return nil, fmt.Errorf("failed to parse metadata: %w", err)
+		}
+	}
+
+	if doc.Tags != "" {
+		if err := json.Unmarshal([]byte(doc.Tags), &d.Tags); err != nil {
+			return nil, fmt.Errorf("failed to parse tags: %w", err)
 		}
 	}
 

@@ -13,6 +13,7 @@ type KnowledgeDocument struct {
 	Metadata       string    `json:"metadata" gorm:"type:json"`         // 存储来源、作者等元信息
 	Enabled        bool      `json:"enabled" gorm:"default:true;index"`
 	Category       string    `json:"category" gorm:"size:100;index"`    // 分类：运维文档、API文档等
+	Tags           string    `json:"tags" gorm:"type:text"`             // JSON 数组 ["tag1", "tag2"]
 	Embedding      string    `json:"embedding" gorm:"type:text"`        // JSON 格式的向量 (用于语义搜索)
 	EmbeddingModel string    `json:"embedding_model" gorm:"size:64"`    // Embedding 模型标识
 }
