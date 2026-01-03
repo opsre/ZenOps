@@ -148,10 +148,19 @@ func (o *Orchestrator) buildSystemPrompt(userCtx *memory.UserContext, knowledgeD
 
 	// 知识库内容
 	if len(knowledgeDocs) > 0 {
-		prompt += "\n参考资料:\n"
-		for _, doc := range knowledgeDocs {
-			prompt += fmt.Sprintf("- %s: %s\n", doc.Title, doc.Content[:min(200, len(doc.Content))])
+		logx.Info("📚 Injecting %d knowledge documents into system prompt", len(knowledgeDocs))
+		prompt += "\n\n📚 **参考资料（来自知识库）:**\n"
+		for i, doc := range knowledgeDocs {
+			contentPreview := doc.Content
+			if len(contentPreview) > 500 {
+				contentPreview = contentPreview[:500] + "..."
+			}
+			prompt += fmt.Sprintf("\n### 文档 %d: %s\n%s\n", i+1, doc.Title, contentPreview)
+			logx.Debug("  Injected doc: %s (%d chars)", doc.Title, len(contentPreview))
 		}
+		prompt += "\n**请优先使用以上参考资料回答用户问题。**\n"
+	} else {
+		logx.Warn("⚠️ No knowledge documents to inject into system prompt")
 	}
 
 	prompt += "\n当用户询问相关信息时，请主动调用相应的工具来获取准确的数据。"

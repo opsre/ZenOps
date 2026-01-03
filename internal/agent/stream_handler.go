@@ -57,6 +57,8 @@ func (s *StreamHandler) ChatStream(ctx context.Context, req *ChatRequest) (<-cha
 	go func() {
 		defer close(responseCh)
 
+		logx.Info("🚀 [ChatStream] Starting chat stream for user=%s, message=%s", req.Username, req.Message)
+
 		// 1. 检查语义缓存（优先）
 		if cachedAnswer, hit, err := s.orchestrator.memoryMgr.GetSemanticCachedAnswer(ctx, req.Username, req.Message); err == nil && hit {
 			logx.Info("✅ Semantic cache hit, returning cached answer")
@@ -67,10 +69,12 @@ func (s *StreamHandler) ChatStream(ctx context.Context, req *ChatRequest) (<-cha
 		// 2. 检查精确匹配缓存
 		cachedAnswer, hit, err := s.orchestrator.memoryMgr.GetCachedAnswer(req.Username, req.Message)
 		if err == nil && hit {
-			logx.Info("✅ Exact cache hit, returning cached answer")
+			logx.Info("✅ [ChatStream] Exact cache hit, returning cached answer")
 			responseCh <- cachedAnswer
 			return
 		}
+
+		logx.Info("📝 [ChatStream] Cache miss, proceeding with full chat flow")
 
 		// 3. 加载对话历史
 		chatLogs, err := s.orchestrator.memoryMgr.GetConversationHistory(req.ConversationID, 10)
@@ -97,10 +101,18 @@ func (s *StreamHandler) ChatStream(ctx context.Context, req *ChatRequest) (<-cha
 		// 5. 检索知识库
 		var knowledgeDocs []*knowledge.Document
 		if s.orchestrator.knowledgeRet != nil {
+			logx.Info("🔍 Retrieving knowledge for query: %s", req.Message)
 			knowledgeDocs, err = s.orchestrator.knowledgeRet.Retrieve(ctx, req.Message)
 			if err != nil {
 				logx.Warn("Failed to retrieve knowledge: %v", err)
+			} else {
+				logx.Info("✅ Retrieved %d knowledge documents", len(knowledgeDocs))
+				for i, doc := range knowledgeDocs {
+					logx.Debug("  Doc %d: %s (%.2f)", i+1, doc.Title, doc.Score)
+				}
 			}
+		} else {
+			logx.Warn("⚠️ Knowledge retriever is nil, skipping knowledge search")
 		}
 
 		// 6. 构建 MCP 工具列表

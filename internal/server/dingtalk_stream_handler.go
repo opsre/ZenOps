@@ -105,11 +105,17 @@ func (h *DingTalkStreamHandler) onChatBotMessage(ctx context.Context, data *chat
 
 	// 使用新的 Agent 系统处理消息
 	agentSystem := GetGlobalAgent()
+	logx.Info("🔍 [DingTalk] Checking Agent system: agentSystem=%v, streamHandler=%v",
+		agentSystem != nil,
+		agentSystem != nil && agentSystem.StreamHandler != nil)
+
 	if agentSystem != nil && agentSystem.StreamHandler != nil {
-		logx.Info("Using Agent system to process message")
+		logx.Info("✅ [DingTalk] Using Agent system to process message")
 		go h.processAgentMessage(ctx, data, content)
 		return []byte(""), nil
 	}
+
+	logx.Warn("⚠️ [DingTalk] Agent system not available, falling back to intent parser")
 
 	// 传统的意图解析模式
 	intent, err := h.intentParser.Parse(content)
@@ -728,7 +734,7 @@ func (h *DingTalkStreamHandler) sendTextReply(data *chatbot.BotCallbackDataModel
 
 // processAgentMessage 使用 Agent 系统处理消息
 func (h *DingTalkStreamHandler) processAgentMessage(ctx context.Context, data *chatbot.BotCallbackDataModel, userMessage string) {
-	logx.Info("Processing message with Agent system, user %s asked: %s", data.SenderNick, userMessage)
+	logx.Info("📨 [DingTalk] processAgentMessage called, user=%s, message=%s", data.SenderNick, userMessage)
 
 	// 确定消息来源（私聊/群聊）
 	source := "dingtalk_private"

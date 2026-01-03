@@ -146,10 +146,38 @@ func (r *Retriever) retrieveByFTS5(query string) ([]*Document, error) {
 
 // retrieveByLike 使用 LIKE 搜索（FTS5 失败时的降级方案，对中文友好）
 func (r *Retriever) retrieveByLike(query string) ([]*Document, error) {
-	// 构建 LIKE 查询
-	likePattern := "%" + query + "%"
+	// 提取关键词（移除常见停用词）
+	stopwords := []string{"的", "了", "在", "是", "有", "和", "就", "不", "人", "都", "一", "个", "上", "也", "我", "你", "他", "她", "它", "们", "为", "到", "说", "时", "哪些", "什么", "怎么", "为什么"}
+	keywords := extractKeywords(query, stopwords)
 
-	sql := `
+	if len(keywords) == 0 {
+		// 如果没有关键词，使用原始查询
+		keywords = []string{query}
+	}
+
+	logx.Debug("Extracted keywords from query '%s': %v", query, keywords)
+
+	// 构建 WHERE 条件：OR 逻辑（匹配任意关键词）
+	var whereConditions []string
+	var whereArgs []interface{}
+	for _, keyword := range keywords {
+		pattern := "%" + keyword + "%"
+		whereConditions = append(whereConditions, "(title LIKE ? OR content LIKE ? OR tags LIKE ?)")
+		whereArgs = append(whereArgs, pattern, pattern, pattern)
+	}
+	whereClause := "(" + strings.Join(whereConditions, " OR ") + ")"
+
+	// 构建 ORDER BY 条件：标题匹配优先
+	var orderConditions []string
+	var orderArgs []interface{}
+	for _, keyword := range keywords {
+		pattern := "%" + keyword + "%"
+		orderConditions = append(orderConditions, fmt.Sprintf("WHEN title LIKE ? THEN %d", len(orderConditions)+1))
+		orderArgs = append(orderArgs, pattern)
+	}
+	orderClause := "CASE " + strings.Join(orderConditions, " ") + " ELSE 999 END"
+
+	sql := fmt.Sprintf(`
 		SELECT
 			id,
 			title,
@@ -160,16 +188,15 @@ func (r *Retriever) retrieveByLike(query string) ([]*Document, error) {
 			metadata,
 			1.0 AS score
 		FROM knowledge_documents
-		WHERE (title LIKE ? OR content LIKE ? OR tags LIKE ?)
+		WHERE %s
 		AND enabled = 1
-		ORDER BY
-			CASE
-				WHEN title LIKE ? THEN 1
-				WHEN content LIKE ? THEN 2
-				ELSE 3
-			END
+		ORDER BY %s
 		LIMIT ?
-	`
+	`, whereClause, orderClause)
+
+	// 合并参数
+	args := append(whereArgs, orderArgs...)
+	args = append(args, r.maxResults)
 
 	var results []struct {
 		ID       uint    `gorm:"column:id"`
@@ -182,11 +209,7 @@ func (r *Retriever) retrieveByLike(query string) ([]*Document, error) {
 		Score    float64 `gorm:"column:score"`
 	}
 
-	if err := r.db.Raw(sql,
-		likePattern, likePattern, likePattern, // WHERE 子句
-		likePattern, likePattern, // ORDER BY 子句
-		r.maxResults,
-	).Scan(&results).Error; err != nil {
+	if err := r.db.Raw(sql, args...).Scan(&results).Error; err != nil {
 		return nil, fmt.Errorf("LIKE search failed: %w", err)
 	}
 
@@ -221,8 +244,70 @@ func (r *Retriever) retrieveByLike(query string) ([]*Document, error) {
 		documents = append(documents, doc)
 	}
 
-	logx.Info("LIKE search found %d documents for query: %s", len(documents), query)
+	logx.Info("LIKE search found %d documents for query: %s (keywords: %v)", len(documents), query, keywords)
 	return documents, nil
+}
+
+// extractKeywords 从查询中提取关键词（移除停用词）
+func extractKeywords(query string, stopwords []string) []string {
+	// 1. 先按空格和常见标点分割
+	delimiters := []string{" ", "、", "，", ",", "。", ".", "？", "?", "！", "!"}
+	words := []string{query}
+
+	for _, delim := range delimiters {
+		var newWords []string
+		for _, word := range words {
+			parts := strings.Split(word, delim)
+			for _, part := range parts {
+				if part != "" {
+					newWords = append(newWords, part)
+				}
+			}
+		}
+		words = newWords
+	}
+
+	// 2. 如果没有分割出多个词（中文查询通常没有空格），则按停用词分割
+	if len(words) == 1 && len(words[0]) > 2 {
+		originalQuery := words[0]
+		for _, sw := range stopwords {
+			if strings.Contains(originalQuery, sw) {
+				// 按停用词分割
+				parts := strings.Split(originalQuery, sw)
+				words = nil
+				for _, part := range parts {
+					part = strings.TrimSpace(part)
+					if part != "" {
+						words = append(words, part)
+					}
+				}
+				if len(words) > 1 {
+					break // 分割成功，停止
+				}
+			}
+		}
+	}
+
+	// 3. 移除停用词和过短的词
+	var keywords []string
+	for _, word := range words {
+		word = strings.TrimSpace(word)
+		if len(word) < 2 { // 过滤单字词
+			continue
+		}
+		isStopword := false
+		for _, sw := range stopwords {
+			if word == sw {
+				isStopword = true
+				break
+			}
+		}
+		if !isStopword {
+			keywords = append(keywords, word)
+		}
+	}
+
+	return keywords
 }
 
 // AddDocument 添加文档到知识库
