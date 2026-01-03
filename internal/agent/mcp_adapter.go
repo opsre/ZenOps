@@ -75,9 +75,8 @@ func (t *MCPToolAdapter) InvokableRun(ctx context.Context, argumentsInJSON strin
 	t.logMCPCall(t.name, params, result, latency, err)
 
 	if err != nil {
-		errMsg := fmt.Sprintf("MCP tool call failed: %v", err)
-		logx.Error(errMsg)
-		return "", fmt.Errorf(errMsg)
+		logx.Error("MCP tool call failed: %v", err)
+		return "", fmt.Errorf("MCP tool call failed: %w", err)
 	}
 
 	// 提取文本结果

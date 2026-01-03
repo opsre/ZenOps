@@ -153,7 +153,7 @@ func (s *StreamHandler) executeLLMWithTools(
 	if err != nil {
 		errMsg := fmt.Sprintf("❌ Failed to create chat model: %v", err)
 		responseCh <- errMsg
-		logx.Error(errMsg)
+		logx.Error("Failed to create chat model: %v", err)
 		return errMsg
 	}
 
@@ -183,7 +183,7 @@ func (s *StreamHandler) executeLLMWithTools(
 		if err != nil {
 			errMsg := fmt.Sprintf("❌ LLM 调用失败: %v", err)
 			responseCh <- errMsg
-			logx.Error(errMsg)
+			logx.Error("LLM 调用失败: %v", err)
 			return errMsg
 		}
 

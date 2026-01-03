@@ -769,7 +769,7 @@ func (h *DingTalkStreamHandler) processAgentMessage(ctx context.Context, data *c
 	agentSystem := GetGlobalAgent()
 	if agentSystem == nil || agentSystem.StreamHandler == nil {
 		errorMsg := "❌ Agent 系统未初始化"
-		logx.Error(errorMsg)
+		logx.Error("Agent 系统未初始化")
 		if useCard {
 			_ = h.cardClient.StreamingUpdate(trackID, fmt.Sprintf("**%s**\n\n%s", userMessage, errorMsg), true)
 		} else {
