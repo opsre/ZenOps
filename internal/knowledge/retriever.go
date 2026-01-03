@@ -134,6 +134,94 @@ func (r *Retriever) retrieveByFTS5(query string) ([]*Document, error) {
 	}
 
 	logx.Info("FTS5 search found %d documents for query: %s", len(documents), query)
+
+	// 如果 FTS5 没有结果，降级使用 LIKE 搜索（对中文更友好）
+	if len(documents) == 0 {
+		logx.Warn("FTS5 returned 0 results, falling back to LIKE search")
+		return r.retrieveByLike(query)
+	}
+
+	return documents, nil
+}
+
+// retrieveByLike 使用 LIKE 搜索（FTS5 失败时的降级方案，对中文友好）
+func (r *Retriever) retrieveByLike(query string) ([]*Document, error) {
+	// 构建 LIKE 查询
+	likePattern := "%" + query + "%"
+
+	sql := `
+		SELECT
+			id,
+			title,
+			content,
+			doc_type,
+			category,
+			tags,
+			metadata,
+			1.0 AS score
+		FROM knowledge_documents
+		WHERE (title LIKE ? OR content LIKE ? OR tags LIKE ?)
+		AND enabled = 1
+		ORDER BY
+			CASE
+				WHEN title LIKE ? THEN 1
+				WHEN content LIKE ? THEN 2
+				ELSE 3
+			END
+		LIMIT ?
+	`
+
+	var results []struct {
+		ID       uint    `gorm:"column:id"`
+		Title    string  `gorm:"column:title"`
+		Content  string  `gorm:"column:content"`
+		DocType  string  `gorm:"column:doc_type"`
+		Category string  `gorm:"column:category"`
+		Tags     string  `gorm:"column:tags"`
+		Metadata string  `gorm:"column:metadata"`
+		Score    float64 `gorm:"column:score"`
+	}
+
+	if err := r.db.Raw(sql,
+		likePattern, likePattern, likePattern, // WHERE 子句
+		likePattern, likePattern, // ORDER BY 子句
+		r.maxResults,
+	).Scan(&results).Error; err != nil {
+		return nil, fmt.Errorf("LIKE search failed: %w", err)
+	}
+
+	// 转换为 Document 结构
+	var documents []*Document
+	for _, res := range results {
+		doc := &Document{
+			ID:       res.ID,
+			Title:    res.Title,
+			Content:  res.Content,
+			DocType:  res.DocType,
+			Category: res.Category,
+			Score:    res.Score,
+			Metadata: make(map[string]string),
+			Tags:     []string{},
+		}
+
+		// 解析 JSON metadata
+		if res.Metadata != "" {
+			if err := json.Unmarshal([]byte(res.Metadata), &doc.Metadata); err != nil {
+				logx.Warn("Failed to parse metadata for doc %d: %v", res.ID, err)
+			}
+		}
+
+		// 解析 JSON tags
+		if res.Tags != "" {
+			if err := json.Unmarshal([]byte(res.Tags), &doc.Tags); err != nil {
+				logx.Warn("Failed to parse tags for doc %d: %v", res.ID, err)
+			}
+		}
+
+		documents = append(documents, doc)
+	}
+
+	logx.Info("LIKE search found %d documents for query: %s", len(documents), query)
 	return documents, nil
 }
 
