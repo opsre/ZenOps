@@ -3,7 +3,7 @@ providers:
   # 阿里云账号配置(支持多账号)
   aliyun:
     - name: "default"
-      enabled: true
+      enabled: false
       ak: "YOUR_ACCESS_KEY_ID"
       sk: "YOUR_ACCESS_KEY_SECRET"
       regions:
@@ -20,7 +20,7 @@ providers:
   # 腾讯云账号配置(支持多账号)
   tencent:
     - name: "default"
-      enabled: true
+      enabled: false
       ak: "YOUR_SECRET_ID"
       sk: "YOUR_SECRET_KEY"
       regions:
@@ -31,7 +31,7 @@ providers:
 cicd:
   # Jenkins 配置
   jenkins:
-    enabled: true
+    enabled: false
     url: "https://jenkins.example.com"
     username: "admin"
     token: "YOUR_JENKINS_TOKEN"

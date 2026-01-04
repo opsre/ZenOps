@@ -138,42 +138,18 @@ func formatOSSBuckets(buckets []*model.OSSBucket, accountName string) string {
 
 // getAliyunConfigByName 获取指定名称的阿里云账号配置（辅助方法）
 func (s *MCPServer) getAliyunConfigByName(accountName string) (*AliyunAccountConfig, error) {
-	if len(s.config.Providers.Aliyun) == 0 {
-		return nil, fmt.Errorf("no aliyun account configured")
+	// 使用 helpers.go 中的方法从数据库或配置获取
+	cfg, err := s.getAliyunConfigByNameFromDB(accountName)
+	if err != nil {
+		return nil, err
 	}
 
-	if accountName == "" {
-		for _, acc := range s.config.Providers.Aliyun {
-			if acc.Enabled {
-				return &AliyunAccountConfig{
-					Name:    acc.Name,
-					AK:      acc.AK,
-					SK:      acc.SK,
-					Regions: acc.Regions,
-				}, nil
-			}
-		}
-		acc := s.config.Providers.Aliyun[0]
-		return &AliyunAccountConfig{
-			Name:    acc.Name,
-			AK:      acc.AK,
-			SK:      acc.SK,
-			Regions: acc.Regions,
-		}, nil
-	}
-
-	for _, acc := range s.config.Providers.Aliyun {
-		if acc.Name == accountName {
-			return &AliyunAccountConfig{
-				Name:    acc.Name,
-				AK:      acc.AK,
-				SK:      acc.SK,
-				Regions: acc.Regions,
-			}, nil
-		}
-	}
-
-	return nil, fmt.Errorf("aliyun account '%s' not found", accountName)
+	return &AliyunAccountConfig{
+		Name:    cfg.Name,
+		AK:      cfg.AK,
+		SK:      cfg.SK,
+		Regions: cfg.Regions,
+	}, nil
 }
 
 // AliyunAccountConfig 阿里云账号配置

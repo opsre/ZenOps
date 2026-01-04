@@ -16,6 +16,7 @@ import (
 	"github.com/eryajf/zenops/internal/model"
 	"github.com/eryajf/zenops/internal/provider"
 	aliyunprovider "github.com/eryajf/zenops/internal/provider/aliyun"
+	"github.com/eryajf/zenops/internal/service"
 	"github.com/eryajf/zenops/internal/wecom"
 	"github.com/eryajf/zenops/web"
 	"github.com/gin-gonic/gin"
@@ -1432,6 +1433,56 @@ func (s *HTTPGinServer) handleJenkinsBuildList(c *gin.Context) {
 
 // getAliyunConfigByName 根据名称获取阿里云账号配置
 func getAliyunConfigByName(cfg *config.Config, accountName string) (*config.ProviderConfig, error) {
+	// 先尝试从数据库加载
+	configService := service.NewConfigService()
+	accounts, err := configService.ListProviderAccounts("aliyun")
+	if err == nil && len(accounts) > 0 {
+		logx.Debug("Loading aliyun config from database for HTTP API, account count %d", len(accounts))
+
+		// 如果没有指定账号名,返回第一个启用的账号
+		if accountName == "" {
+			for _, acc := range accounts {
+				if acc.Enabled {
+					return &config.ProviderConfig{
+						Name:    acc.Name,
+						Enabled: acc.Enabled,
+						AK:      acc.AccessKey,
+						SK:      acc.SecretKey,
+						Regions: acc.Regions,
+					}, nil
+				}
+			}
+			// 如果没有启用的,返回第一个
+			if len(accounts) > 0 {
+				acc := accounts[0]
+				return &config.ProviderConfig{
+					Name:    acc.Name,
+					Enabled: acc.Enabled,
+					AK:      acc.AccessKey,
+					SK:      acc.SecretKey,
+					Regions: acc.Regions,
+				}, nil
+			}
+		}
+
+		// 根据名称查找
+		for _, acc := range accounts {
+			if acc.Name == accountName {
+				return &config.ProviderConfig{
+					Name:    acc.Name,
+					Enabled: acc.Enabled,
+					AK:      acc.AccessKey,
+					SK:      acc.SecretKey,
+					Regions: acc.Regions,
+				}, nil
+			}
+		}
+
+		return nil, fmt.Errorf("aliyun account '%s' not found in database", accountName)
+	}
+
+	// 如果数据库没有配置,回退到 YAML 配置
+	logx.Debug("No aliyun config in database for HTTP API, falling back to YAML config")
 	if len(cfg.Providers.Aliyun) == 0 {
 		return nil, fmt.Errorf("no aliyun account configured")
 	}
@@ -1456,6 +1507,56 @@ func getAliyunConfigByName(cfg *config.Config, accountName string) (*config.Prov
 
 // getTencentConfigByName 根据名称获取腾讯云账号配置
 func getTencentConfigByName(cfg *config.Config, accountName string) (*config.ProviderConfig, error) {
+	// 先尝试从数据库加载
+	configService := service.NewConfigService()
+	accounts, err := configService.ListProviderAccounts("tencent")
+	if err == nil && len(accounts) > 0 {
+		logx.Debug("Loading tencent config from database for HTTP API, account count %d", len(accounts))
+
+		// 如果没有指定账号名,返回第一个启用的账号
+		if accountName == "" {
+			for _, acc := range accounts {
+				if acc.Enabled {
+					return &config.ProviderConfig{
+						Name:    acc.Name,
+						Enabled: acc.Enabled,
+						AK:      acc.AccessKey,
+						SK:      acc.SecretKey,
+						Regions: acc.Regions,
+					}, nil
+				}
+			}
+			// 如果没有启用的,返回第一个
+			if len(accounts) > 0 {
+				acc := accounts[0]
+				return &config.ProviderConfig{
+					Name:    acc.Name,
+					Enabled: acc.Enabled,
+					AK:      acc.AccessKey,
+					SK:      acc.SecretKey,
+					Regions: acc.Regions,
+				}, nil
+			}
+		}
+
+		// 根据名称查找
+		for _, acc := range accounts {
+			if acc.Name == accountName {
+				return &config.ProviderConfig{
+					Name:    acc.Name,
+					Enabled: acc.Enabled,
+					AK:      acc.AccessKey,
+					SK:      acc.SecretKey,
+					Regions: acc.Regions,
+				}, nil
+			}
+		}
+
+		return nil, fmt.Errorf("tencent account '%s' not found in database", accountName)
+	}
+
+	// 如果数据库没有配置,回退到 YAML 配置
+	logx.Debug("No tencent config in database for HTTP API, falling back to YAML config")
 	if len(cfg.Providers.Tencent) == 0 {
 		return nil, fmt.Errorf("no tencent account configured")
 	}

@@ -4,18 +4,20 @@ import (
 	"fmt"
 	"strings"
 
+	"cnb.cool/zhiqiangwang/pkg/logx"
 	"github.com/eryajf/zenops/internal/config"
 	"github.com/eryajf/zenops/internal/model"
 	"github.com/eryajf/zenops/internal/provider"
 	"github.com/eryajf/zenops/internal/provider/aliyun"
+	"github.com/eryajf/zenops/internal/service"
 )
 
 // ==================== Provider 辅助函数 ====================
 
 // getAliyunProvider 获取阿里云 Provider
 func (s *MCPServer) getAliyunProvider(accountName string) (provider.Provider, *config.ProviderConfig, error) {
-	// 获取账号配置
-	aliyunConfig, err := getAliyunConfigByName(s.config, accountName)
+	// 从数据库或配置获取账号配置
+	aliyunConfig, err := s.getAliyunConfigByNameFromDB(accountName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -42,8 +44,8 @@ func (s *MCPServer) getAliyunProvider(accountName string) (provider.Provider, *c
 
 // getAliyunClient 直接获取阿里云客户端（用于高级查询）
 func (s *MCPServer) getAliyunClient(accountName string, region string) (*aliyun.Client, *config.ProviderConfig, error) {
-	// 获取账号配置
-	aliyunConfig, err := getAliyunConfigByName(s.config, accountName)
+	// 从数据库或配置获取账号配置
+	aliyunConfig, err := s.getAliyunConfigByNameFromDB(accountName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -64,8 +66,8 @@ func (s *MCPServer) getAliyunClient(accountName string, region string) (*aliyun.
 
 // getTencentProvider 获取腾讯云 Provider
 func (s *MCPServer) getTencentProvider(accountName string) (provider.Provider, *config.ProviderConfig, error) {
-	// 获取账号配置
-	tencentConfig, err := getTencentConfigByName(s.config, accountName)
+	// 从数据库或配置获取账号配置
+	tencentConfig, err := s.getTencentConfigByNameFromDB(accountName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -112,7 +114,62 @@ func (s *MCPServer) getJenkinsProvider() (provider.CICDProvider, error) {
 	return p, nil
 }
 
-// getAliyunConfigByName 根据名称获取阿里云账号配置
+// getAliyunConfigByNameFromDB 从数据库或配置获取阿里云账号配置
+func (s *MCPServer) getAliyunConfigByNameFromDB(accountName string) (*config.ProviderConfig, error) {
+	// 先尝试从数据库加载
+	configService := service.NewConfigService()
+	accounts, err := configService.ListProviderAccounts("aliyun")
+	if err == nil && len(accounts) > 0 {
+		logx.Debug("Loading aliyun config from database, account count %d", len(accounts))
+
+		// 如果没有指定账号名,返回第一个启用的账号
+		if accountName == "" {
+			for _, acc := range accounts {
+				if acc.Enabled {
+					return &config.ProviderConfig{
+						Name:    acc.Name,
+						Enabled: acc.Enabled,
+						AK:      acc.AccessKey,
+						SK:      acc.SecretKey,
+						Regions: acc.Regions,
+					}, nil
+				}
+			}
+			// 如果没有启用的,返回第一个
+			if len(accounts) > 0 {
+				acc := accounts[0]
+				return &config.ProviderConfig{
+					Name:    acc.Name,
+					Enabled: acc.Enabled,
+					AK:      acc.AccessKey,
+					SK:      acc.SecretKey,
+					Regions: acc.Regions,
+				}, nil
+			}
+		}
+
+		// 根据名称查找
+		for _, acc := range accounts {
+			if acc.Name == accountName {
+				return &config.ProviderConfig{
+					Name:    acc.Name,
+					Enabled: acc.Enabled,
+					AK:      acc.AccessKey,
+					SK:      acc.SecretKey,
+					Regions: acc.Regions,
+				}, nil
+			}
+		}
+
+		return nil, fmt.Errorf("aliyun account '%s' not found in database", accountName)
+	}
+
+	// 如果数据库没有配置,回退到 YAML 配置
+	logx.Debug("No aliyun config in database, falling back to YAML config")
+	return getAliyunConfigByName(s.config, accountName)
+}
+
+// getAliyunConfigByName 根据名称获取阿里云账号配置(从YAML)
 func getAliyunConfigByName(cfg *config.Config, accountName string) (*config.ProviderConfig, error) {
 	if len(cfg.Providers.Aliyun) == 0 {
 		return nil, fmt.Errorf("no aliyun account configured")
@@ -136,7 +193,62 @@ func getAliyunConfigByName(cfg *config.Config, accountName string) (*config.Prov
 	return nil, fmt.Errorf("aliyun account '%s' not found", accountName)
 }
 
-// getTencentConfigByName 根据名称获取腾讯云账号配置
+// getTencentConfigByNameFromDB 从数据库或配置获取腾讯云账号配置
+func (s *MCPServer) getTencentConfigByNameFromDB(accountName string) (*config.ProviderConfig, error) {
+	// 先尝试从数据库加载
+	configService := service.NewConfigService()
+	accounts, err := configService.ListProviderAccounts("tencent")
+	if err == nil && len(accounts) > 0 {
+		logx.Debug("Loading tencent config from database, account count %d", len(accounts))
+
+		// 如果没有指定账号名,返回第一个启用的账号
+		if accountName == "" {
+			for _, acc := range accounts {
+				if acc.Enabled {
+					return &config.ProviderConfig{
+						Name:    acc.Name,
+						Enabled: acc.Enabled,
+						AK:      acc.AccessKey,
+						SK:      acc.SecretKey,
+						Regions: acc.Regions,
+					}, nil
+				}
+			}
+			// 如果没有启用的,返回第一个
+			if len(accounts) > 0 {
+				acc := accounts[0]
+				return &config.ProviderConfig{
+					Name:    acc.Name,
+					Enabled: acc.Enabled,
+					AK:      acc.AccessKey,
+					SK:      acc.SecretKey,
+					Regions: acc.Regions,
+				}, nil
+			}
+		}
+
+		// 根据名称查找
+		for _, acc := range accounts {
+			if acc.Name == accountName {
+				return &config.ProviderConfig{
+					Name:    acc.Name,
+					Enabled: acc.Enabled,
+					AK:      acc.AccessKey,
+					SK:      acc.SecretKey,
+					Regions: acc.Regions,
+				}, nil
+			}
+		}
+
+		return nil, fmt.Errorf("tencent account '%s' not found in database", accountName)
+	}
+
+	// 如果数据库没有配置,回退到 YAML 配置
+	logx.Debug("No tencent config in database, falling back to YAML config")
+	return getTencentConfigByName(s.config, accountName)
+}
+
+// getTencentConfigByName 根据名称获取腾讯云账号配置(从YAML)
 func getTencentConfigByName(cfg *config.Config, accountName string) (*config.ProviderConfig, error) {
 	if len(cfg.Providers.Tencent) == 0 {
 		return nil, fmt.Errorf("no tencent account configured")
