@@ -141,42 +141,18 @@ func formatCOSBuckets(buckets []*model.OSSBucket, accountName string) string {
 
 // getTencentConfigByName 获取指定名称的腾讯云账号配置（辅助方法）
 func (s *MCPServer) getTencentConfigByName(accountName string) (*TencentAccountConfig, error) {
-	if len(s.config.Providers.Tencent) == 0 {
-		return nil, fmt.Errorf("no tencent account configured")
+	// 使用 helpers.go 中的方法从数据库或配置获取
+	cfg, err := s.getTencentConfigByNameFromDB(accountName)
+	if err != nil {
+		return nil, err
 	}
 
-	if accountName == "" {
-		for _, acc := range s.config.Providers.Tencent {
-			if acc.Enabled {
-				return &TencentAccountConfig{
-					Name:    acc.Name,
-					AK:      acc.AK,
-					SK:      acc.SK,
-					Regions: acc.Regions,
-				}, nil
-			}
-		}
-		acc := s.config.Providers.Tencent[0]
-		return &TencentAccountConfig{
-			Name:    acc.Name,
-			AK:      acc.AK,
-			SK:      acc.SK,
-			Regions: acc.Regions,
-		}, nil
-	}
-
-	for _, acc := range s.config.Providers.Tencent {
-		if acc.Name == accountName {
-			return &TencentAccountConfig{
-				Name:    acc.Name,
-				AK:      acc.AK,
-				SK:      acc.SK,
-				Regions: acc.Regions,
-			}, nil
-		}
-	}
-
-	return nil, fmt.Errorf("tencent account '%s' not found", accountName)
+	return &TencentAccountConfig{
+		Name:    cfg.Name,
+		AK:      cfg.AK,
+		SK:      cfg.SK,
+		Regions: cfg.Regions,
+	}, nil
 }
 
 // TencentAccountConfig 腾讯云账号配置
