@@ -330,6 +330,7 @@ func (m *Manager) CloseAll() {
 }
 
 // RegisterFromDB 从数据库模型注册 MCP 客户端
+// 注意: autoRegister 参数已废弃，现在只要 MCP 服务器被成功注册，其工具就会被自动注册
 func (m *Manager) RegisterFromDB(name string, serverType string, command string, args []string, env map[string]string, baseURL string, headers map[string]string, timeout int, toolPrefix string, autoRegister bool) error {
 	// 创建配置
 	cfg := &config.MCPServerConfig{
@@ -342,7 +343,7 @@ func (m *Manager) RegisterFromDB(name string, serverType string, command string,
 		Timeout:      timeout,
 		IsActive:     true,
 		ToolPrefix:   toolPrefix,
-		AutoRegister: autoRegister,
+		AutoRegister: autoRegister, // 已废弃，保留仅为向后兼容
 	}
 
 	return m.Register(name, cfg)
