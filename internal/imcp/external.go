@@ -20,11 +20,8 @@ func (s *MCPServer) RegisterExternalMCPTools(ctx context.Context, manager *mcpcl
 
 	// 遍历所有外部 MCP 客户端
 	for _, mcpClient := range manager.List() {
-		if !mcpClient.Config.AutoRegister {
-			logx.Info("⏭️  Skip auto-register for MCP: %s", mcpClient.Config.Name)
-			continue
-		}
-
+		// 只要 MCP 客户端已加载到 Manager 中，就注册其工具
+		// 注意：Manager.LoadFromConfig 已经过滤了未启用的服务器
 		registeredCount := 0
 		failedCount := 0
 
